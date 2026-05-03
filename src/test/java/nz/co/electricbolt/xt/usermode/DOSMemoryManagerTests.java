@@ -170,6 +170,68 @@ class DOSMemoryManagerTests {
     }
 
     @Test
+    void probeWithZero_returnsLargestBlock() {
+        mgr.releaseUnusedMemoryAfterLoad(PSP_SEGMENT, (short) 0x0146, (short) 0x1FFE);
+        cpu.getReg().DS.setValue(PSP_SEGMENT);
+
+        // Probe with BX=0
+        mgr.allocateMemory(cpu, (short) 0);
+        assertTrue(cpu.getReg().flags.isCarry());
+        assertEquals((short) 0x0008, cpu.getReg().AX.getValue());
+        int bx = cpu.getReg().BX.getValue() & 0xFFFF;
+        assertTrue(bx > 0);
+    }
+
+    @Test
+    void fragmentedMemory_isMergedOnAllocate() {
+        mgr.releaseUnusedMemoryAfterLoad(PSP_SEGMENT, (short) 0x0146, (short) 0x1FFE);
+        cpu.getReg().DS.setValue(PSP_SEGMENT);
+
+        // Allocate three blocks
+        mgr.allocateMemory(cpu, (short) 0x0100);
+        short seg1 = cpu.getReg().AX.getValue();
+        mgr.allocateMemory(cpu, (short) 0x0100);
+        short seg2 = cpu.getReg().AX.getValue();
+        mgr.allocateMemory(cpu, (short) 0x0100);
+        short seg3 = cpu.getReg().AX.getValue();
+
+        // Free the middle one and the third one - they are adjacent
+        mgr.freeMemory(cpu, seg2);
+        mgr.freeMemory(cpu, seg3);
+
+        // Now we have two adjacent free blocks of 0x100 each (+ 1 for MCB of seg3)
+        // A probe should see them as merged
+        mgr.allocateMemory(cpu, (short) 0xFFFF);
+        int bx = cpu.getReg().BX.getValue() & 0xFFFF;
+        assertTrue(bx >= 0x0201, "Merged block must be at least 0x201 (got " + Integer.toHexString(bx) + ")");
+    }
+
+    @Test
+    void resizeGrow_returnsMaxSizeAvailable() {
+        mgr.releaseUnusedMemoryAfterLoad(PSP_SEGMENT, (short) 0x0146, (short) 0x1FFE);
+        cpu.getReg().DS.setValue(PSP_SEGMENT);
+
+        // Allocate a block
+        mgr.allocateMemory(cpu, (short) 0x0100);
+        short seg1 = cpu.getReg().AX.getValue();
+
+        // Allocate another block to act as a barrier
+        mgr.allocateMemory(cpu, (short) 0x0100);
+        short seg2 = cpu.getReg().AX.getValue();
+
+        // Free the barrier - now there is a free block after seg1
+        mgr.freeMemory(cpu, seg2);
+
+        // Try to grow seg1 to something much larger than current size + following free block
+        mgr.resizeMemory(cpu, seg1, (short) 0xFFFF);
+        assertTrue(cpu.getReg().flags.isCarry());
+        int bx = cpu.getReg().BX.getValue() & 0xFFFF;
+        // Should be 0x100 (current) + 1 (MCB) + 0x100 (free) = 0x201
+        // OR more, depending on what else was free after seg2
+        assertTrue(bx >= 0x0201, "BX must return maximum possible growth size (got " + Integer.toHexString(bx) + ")");
+    }
+
+    @Test
     void freeInvalidSegment_setsCarry() {
         mgr.releaseUnusedMemoryAfterLoad(PSP_SEGMENT, (short) 0x0146, (short) 0x1FFE);
         mgr.freeMemory(cpu, (short) 0x1234); // not an MCB+1 segment

@@ -97,12 +97,8 @@ public class DOSMemoryManager {
             cpu.getReg().AX.setValue((byte) ERROR_INVALID_FUNCTION);
             return;
         }
-        
-        if (paragraphsRequested == 0) {
-            cpu.getReg().flags.setCarry(true);
-            cpu.getReg().AX.setValue((byte) ERROR_INVALID_FUNCTION);
-            return;
-        }
+
+        mergeFreeBlocks();
 
         int paragraphsU = paragraphsRequested & 0xFFFF;
 
@@ -123,7 +119,7 @@ public class DOSMemoryManager {
 
             // If this is a free block (PID == 0)
             if (pid == 0) {
-                if (blockSizeU >= paragraphsU) {
+                if (paragraphsU > 0 && blockSizeU >= paragraphsU) {
                     // Found a suitable block
                     if (bestBlockSegment == 0 || blockSizeU < (bestBlockSize & 0xFFFF)) {
                         bestBlockSegment = currentSegment;
@@ -145,7 +141,7 @@ public class DOSMemoryManager {
         }
         
         if (bestBlockSegment == 0) {
-            // No block large enough
+            // No block large enough or paragraphsRequested == 0 (probe)
             cpu.getReg().flags.setCarry(true);
             cpu.getReg().AX.setValue((byte) ERROR_INSUFFICIENT_MEMORY);
             cpu.getReg().BX.setValue(largestBlockSize);
@@ -259,18 +255,19 @@ public class DOSMemoryManager {
         }
 
         // Grow: check if the immediately following block is free and large enough
+        int maxSizeAvailable = currentSize;
         if (marker != MCB_LAST) {
             short nextMCB = (short) (mcbSeg + currentSize + 1);
             short nextPid = cpu.getMemory().readWord(new SegOfs(nextMCB, MCB_PID));
             if (nextPid == 0) {
                 int nextSize = cpu.getMemory().readWord(new SegOfs(nextMCB, MCB_SIZE)) & 0xFFFF;
-                int combined = currentSize + 1 + nextSize; // current data + next MCB + next data
-                if (newSizeU <= combined) {
+                maxSizeAvailable = currentSize + 1 + nextSize; // current data + next MCB + next data
+                if (newSizeU <= maxSizeAvailable) {
                     byte nextMarker = cpu.getMemory().readByte(new SegOfs(nextMCB, MCB_MARKER));
                     // Absorb the free block and possibly re-split
-                    cpu.getMemory().writeWord(new SegOfs(mcbSeg, MCB_SIZE), (short) combined);
+                    cpu.getMemory().writeWord(new SegOfs(mcbSeg, MCB_SIZE), (short) maxSizeAvailable);
                     cpu.getMemory().writeByte(new SegOfs(mcbSeg, MCB_MARKER), nextMarker);
-                    if (newSizeU < combined) {
+                    if (newSizeU < maxSizeAvailable) {
                         // Re-split: leave a free block after the grown allocation
                         resizeMemory(cpu, dataSeg, newSize);
                         return;
@@ -279,12 +276,15 @@ public class DOSMemoryManager {
                     return;
                 }
             }
+        } else {
+            // It's the last block, it can grow up to 0xA000
+            maxSizeAvailable = 0xA000 - (mcbSeg & 0xFFFF) - 1;
         }
 
         // Cannot grow
         cpu.getReg().flags.setCarry(true);
         cpu.getReg().AX.setValue((byte) ERROR_INSUFFICIENT_MEMORY);
-        cpu.getReg().BX.setValue((short) currentSize);
+        cpu.getReg().BX.setValue((short) maxSizeAvailable);
     }
 
     private boolean isMCBInChain(short targetMCB) {
