@@ -59,7 +59,7 @@ public class SegOfs {
     public int toLinearAddress() {
         int address = ((int) segment & 0xFFFF) << 4;
         address = address + (offset & 0xFFFF);
-        address %= Memory.MEMORY_SIZE;
+        address &= 0xFFFFF;
         return address;
     }
 }

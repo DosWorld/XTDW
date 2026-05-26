@@ -41,6 +41,7 @@ public class TerminateProgram {
         cpu.getReg().setFrom(ctx.regs);
         cpu.getReg().SS.setValue(ctx.ss);
         cpu.getReg().SP.setValue(ctx.sp);
+        cpu.syncSegmentBases();
         SegOfs psp = new SegOfs((short) 0x0090, (short) 0x0000);
         for (int i = 0; i < 256; i++) {
             cpu.getMemory().writeByte(new SegOfs(psp.getSegment(), (short)(psp.getOffset() + i)), ctx.psp[i]);

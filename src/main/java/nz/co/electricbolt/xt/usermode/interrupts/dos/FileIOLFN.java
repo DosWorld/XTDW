@@ -28,7 +28,7 @@ public class FileIOLFN {
     @Interrupt(interrupt = 0x21, function = 0x71, subfunction = 0x39, description = "Create directory (LFN)")
     public void createDirectoryLFN(CPU cpu, Trace trace, DirectoryTranslation dirTrans,
                                     @ASCIZ @DS @DX String path) {
-        path = dirTrans.emulatedPathToHostPath(path);
+        path = dirTrans.emulatedLfnPathToHostPath(path);
         File dir = new File(path);
         if (dir.mkdirs()) {
             cpu.getReg().flags.setCarry(false);
@@ -40,7 +40,7 @@ public class FileIOLFN {
     @Interrupt(interrupt = 0x21, function = 0x71, subfunction = 0x3A, description = "Remove directory (LFN)")
     public void removeDirectoryLFN(CPU cpu, Trace trace, DirectoryTranslation dirTrans,
                                     @ASCIZ @DS @DX String path) {
-        path = dirTrans.emulatedPathToHostPath(path);
+        path = dirTrans.emulatedLfnPathToHostPath(path);
         File dir = new File(path);
         if (dir.exists() && dir.isDirectory() && dir.delete()) {
             cpu.getReg().flags.setCarry(false);
@@ -59,7 +59,7 @@ public class FileIOLFN {
     @Interrupt(interrupt = 0x21, function = 0x71, subfunction = 0x41, description = "Delete file (LFN)")
     public void deleteFileLFN(CPU cpu, Trace trace, DirectoryTranslation dirTrans,
                                @ASCIZ @DS @DX String filename) {
-        filename = dirTrans.emulatedPathToHostPath(filename);
+        filename = dirTrans.emulatedLfnPathToHostPath(filename);
         File file = new File(filename);
         if (file.exists() && file.isFile() && file.delete()) {
             cpu.getReg().flags.setCarry(false);
@@ -71,7 +71,7 @@ public class FileIOLFN {
     @Interrupt(interrupt = 0x21, function = 0x71, subfunction = 0x43, description = "Get/Set file attributes (LFN)")
     public void fileAttributesLFN(CPU cpu, Trace trace, DirectoryTranslation dirTrans,
                                    @ASCIZ @DS @DX String filename, final @AL byte operation, final @CX short attributes) {
-        filename = dirTrans.emulatedPathToHostPath(filename);
+        filename = dirTrans.emulatedLfnPathToHostPath(filename);
         if (operation == 0) {
             cpu.getReg().flags.setCarry(false);
             cpu.getReg().CX.setValue((short) 0);
@@ -103,7 +103,7 @@ public class FileIOLFN {
     @Interrupt(interrupt = 0x21, function = 0x71, subfunction = 0x56, description = "Move file (LFN)")
     public void renameFileLFN(CPU cpu, Trace trace, DirectoryTranslation dirTrans,
                                @ASCIZ @DS @DX String source, @ASCIZ @ES @DI String dest) {
-        source = dirTrans.emulatedPathToHostPath(source);
+        source = dirTrans.emulatedLfnPathToHostPath(source);
         dest = dirTrans.emulatedPathToHostPath(dest);
         File src = new File(source);
         File dst = new File(dest);
@@ -117,7 +117,7 @@ public class FileIOLFN {
     @Interrupt(interrupt = 0x21, function = 0x71, subfunction = 0x60, description = "Truename (LFN)")
     public void truenameLFN(CPU cpu, Trace trace, DirectoryTranslation dirTrans,
                              final @CL byte flags, @ASCIZ @DS @SI String sourcePath, @ES @DI SegOfs destBuffer) {
-        String resolved = dirTrans.emulatedPathToHostPath(sourcePath);
+        String resolved = dirTrans.emulatedLfnPathToHostPath(sourcePath);
         MemoryUtil.writeStringZ(cpu.getMemory(), destBuffer, resolved, '\0');
         cpu.getReg().flags.setCarry(false);
     }
@@ -126,7 +126,7 @@ public class FileIOLFN {
     public void openFileLFN(CPU cpu, Trace trace, DirectoryTranslation dirTrans,
                              @ASCIZ @DS @SI String filename, final @BX short accessSharingMode,
                              final @CX short attributes, final @DX short action, final @AL byte fileHandleReturn) {
-        filename = dirTrans.emulatedPathToHostPath(filename);
+        filename = dirTrans.emulatedLfnPathToHostPath(filename);
         AccessMode accessMode = AccessMode.readWrite;
         SharingMode sharingMode = SharingMode.compatibilityMode;
         DiskFile file = new DiskFile(filename, accessMode, sharingMode, false);

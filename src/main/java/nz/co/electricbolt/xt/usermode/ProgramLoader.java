@@ -40,6 +40,7 @@ public class ProgramLoader {
                 cpu.getReg().CS.setValue(pspSegment);
                 cpu.getReg().DS.setValue(pspSegment);
                 cpu.getReg().ES.setValue(pspSegment);
+                cpu.syncSegmentBases();
             } else {
                 // EXE file
                 final EXEHeader header = new EXEHeader(buf);
@@ -70,6 +71,7 @@ public class ProgramLoader {
                 cpu.getReg().CS.setValue((short) (header.relativeCS + loadSegment));
                 cpu.getReg().DS.setValue(pspSegment);
                 cpu.getReg().ES.setValue(pspSegment);
+                cpu.syncSegmentBases();
             }
         } catch (IOException e) {
             System.out.println("The program " + path + " could not be read.");

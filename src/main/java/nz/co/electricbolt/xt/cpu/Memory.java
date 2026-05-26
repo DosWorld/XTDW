@@ -133,11 +133,10 @@ public class Memory {
      * wrapped around to the beginning of the address space at 0x00000.
      */
     public short getWord(SegOfs segOfs) {
-        segOfs = segOfs.copy();
-        byte lo = getByte(segOfs);
-        segOfs.increment();
-        byte hi = getByte(segOfs);
-        return (short) ((hi & 0xFF) << 8 | lo & 0xFF);
+        int segBase = (segOfs.getSegment() & 0xFFFF) << 4;
+        int addrLo = (segBase + (segOfs.getOffset() & 0xFFFF)) & 0xFFFFF;
+        int addrHi = (segBase + ((segOfs.getOffset() + 1) & 0xFFFF)) & 0xFFFFF;
+        return (short) ((buf[addrHi] & 0xFF) << 8 | buf[addrLo] & 0xFF);
     }
 
     /**
@@ -147,10 +146,11 @@ public class Memory {
      * wrapped around to the beginning of the address space at 0x00000.
      */
     public void setWord(SegOfs segOfs, short value) {
-        segOfs = segOfs.copy();
-        setByte(segOfs, (byte) value);
-        segOfs.increment();
-        setByte(segOfs, (byte) (value >> 8));
+        int segBase = (segOfs.getSegment() & 0xFFFF) << 4;
+        int addrLo = (segBase + (segOfs.getOffset() & 0xFFFF)) & 0xFFFFF;
+        int addrHi = (segBase + ((segOfs.getOffset() + 1) & 0xFFFF)) & 0xFFFFF;
+        buf[addrLo] = (byte) value;
+        buf[addrHi] = (byte) (value >> 8);
     }
 
     /**
@@ -160,14 +160,12 @@ public class Memory {
      * at 0x00000.
      */
     public void setDoubleWord(SegOfs segOfs, int value) {
-        segOfs = segOfs.copy();
-        setByte(segOfs, (byte) value);
-        segOfs.increment();
-        setByte(segOfs, (byte) (value >> 8));
-        segOfs.increment();
-        setByte(segOfs, (byte) (value >> 16));
-        segOfs.increment();
-        setByte(segOfs, (byte) (value >> 24));
+        int segBase = (segOfs.getSegment() & 0xFFFF) << 4;
+        int ofs = segOfs.getOffset() & 0xFFFF;
+        buf[(segBase + ofs) & 0xFFFFF] = (byte) value;
+        buf[(segBase + ((ofs + 1) & 0xFFFF)) & 0xFFFFF] = (byte) (value >> 8);
+        buf[(segBase + ((ofs + 2) & 0xFFFF)) & 0xFFFFF] = (byte) (value >> 16);
+        buf[(segBase + ((ofs + 3) & 0xFFFF)) & 0xFFFFF] = (byte) (value >> 24);
     }
 
     /**
@@ -185,10 +183,12 @@ public class Memory {
             }
         }
         byte value = buf[address];
-        if ((permissions[address] & Memory.PERMISSION_READ) == 0) {
-            cpu.delegate.invalidMemoryAccess(segOfs, Memory.PERMISSION_READ);
+        if (cpu != null) {
+            if ((permissions[address] & Memory.PERMISSION_READ) == 0) {
+                cpu.delegate.invalidMemoryAccess(segOfs, Memory.PERMISSION_READ);
+            }
+            if (cpu.hasWatchpoints) cpu.checkMemoryReadWatchpoint(segOfs);
         }
-        cpu.checkMemoryReadWatchpoint(segOfs);
         return value;
     }
 
@@ -201,7 +201,7 @@ public class Memory {
     public byte fetchByte(final SegOfs segOfs) {
         int address = segOfs.toLinearAddress();
         byte value = buf[address];
-        if ((permissions[address] & Memory.PERMISSION_EXECUTE) == 0) {
+        if (cpu != null && (permissions[address] & Memory.PERMISSION_EXECUTE) == 0) {
             cpu.delegate.invalidMemoryAccess(segOfs, Memory.PERMISSION_EXECUTE);
         }
         return value;
@@ -220,10 +220,12 @@ public class Memory {
             ems.writeByte(address, value & 0xFF);
             return;
         }
-        if ((permissions[address] & Memory.PERMISSION_WRITE) == 0) {
-            cpu.delegate.invalidMemoryAccess(segOfs, Memory.PERMISSION_WRITE);
+        if (cpu != null) {
+            if ((permissions[address] & Memory.PERMISSION_WRITE) == 0) {
+                cpu.delegate.invalidMemoryAccess(segOfs, Memory.PERMISSION_WRITE);
+            }
+            if (cpu.hasWatchpoints) cpu.checkMemoryWriteWatchpoint(segOfs);
         }
-        cpu.checkMemoryWriteWatchpoint(segOfs);
         buf[address] = value;
     }
 
@@ -235,10 +237,30 @@ public class Memory {
      * memory address is not readable (Memory.PERMISSION_READ).
      */
     public short readWord(SegOfs segOfs) {
-        segOfs = segOfs.copy();
-        byte lo = readByte(segOfs);
-        segOfs.increment();
-        byte hi = readByte(segOfs);
+        int segBase = (segOfs.getSegment() & 0xFFFF) << 4;
+        int ofsLo = segOfs.getOffset() & 0xFFFF;
+        int ofsHi = (ofsLo + 1) & 0xFFFF;
+        int addrLo = (segBase + ofsLo) & 0xFFFFF;
+        int addrHi = (segBase + ofsHi) & 0xFFFFF;
+        if (ems != null && ems.isPageFrameSegment(segOfs.getSegment())) {
+            int loVal = ems.readByte(addrLo);
+            int hiVal = ems.readByte(addrHi);
+            if (loVal != -1 && hiVal != -1) {
+                return (short) (hiVal << 8 | loVal);
+            }
+        }
+        byte lo = buf[addrLo];
+        byte hi = buf[addrHi];
+        if (cpu != null) {
+            if ((permissions[addrLo] & Memory.PERMISSION_READ) == 0)
+                cpu.delegate.invalidMemoryAccess(new SegOfs(segOfs.getSegment(), (short) ofsLo), Memory.PERMISSION_READ);
+            if ((permissions[addrHi] & Memory.PERMISSION_READ) == 0)
+                cpu.delegate.invalidMemoryAccess(new SegOfs(segOfs.getSegment(), (short) ofsHi), Memory.PERMISSION_READ);
+            if (cpu.hasWatchpoints) {
+                cpu.checkMemoryReadWatchpoint(new SegOfs(segOfs.getSegment(), (short) ofsLo));
+                cpu.checkMemoryReadWatchpoint(new SegOfs(segOfs.getSegment(), (short) ofsHi));
+            }
+        }
         return (short) ((hi & 0xFF) << 8 | lo & 0xFF);
     }
 
@@ -250,10 +272,17 @@ public class Memory {
      * memory address is not executable (Memory.PERMISSION_EXECUTE).
      */
     public short fetchWord(SegOfs segOfs) {
-        segOfs = segOfs.copy();
-        byte lo = fetchByte(segOfs);
-        segOfs.increment();
-        byte hi = fetchByte(segOfs);
+        int segBase = (segOfs.getSegment() & 0xFFFF) << 4;
+        int addrLo = (segBase + (segOfs.getOffset() & 0xFFFF)) & 0xFFFFF;
+        int addrHi = (segBase + ((segOfs.getOffset() + 1) & 0xFFFF)) & 0xFFFFF;
+        byte lo = buf[addrLo];
+        byte hi = buf[addrHi];
+        if (cpu != null) {
+            if ((permissions[addrLo] & Memory.PERMISSION_EXECUTE) == 0)
+                cpu.delegate.invalidMemoryAccess(segOfs, Memory.PERMISSION_EXECUTE);
+            if ((permissions[addrHi] & Memory.PERMISSION_EXECUTE) == 0)
+                cpu.delegate.invalidMemoryAccess(new SegOfs(segOfs.getSegment(), (short) ((segOfs.getOffset() + 1) & 0xFFFF)), Memory.PERMISSION_EXECUTE);
+        }
         return (short) ((hi & 0xFF) << 8 | lo & 0xFF);
     }
 
@@ -265,10 +294,28 @@ public class Memory {
      * memory address is not writable (Memory.PERMISSION_WRITE).
      */
     public void writeWord(SegOfs segOfs, short value) {
-        segOfs = segOfs.copy();
-        writeByte(segOfs, (byte) value);
-        segOfs.increment();
-        writeByte(segOfs, (byte) (value >> 8));
+        int segBase = (segOfs.getSegment() & 0xFFFF) << 4;
+        int ofsLo = segOfs.getOffset() & 0xFFFF;
+        int ofsHi = (ofsLo + 1) & 0xFFFF;
+        int addrLo = (segBase + ofsLo) & 0xFFFFF;
+        int addrHi = (segBase + ofsHi) & 0xFFFFF;
+        if (ems != null && ems.isPageFrameSegment(segOfs.getSegment())) {
+            ems.writeByte(addrLo, (byte) value & 0xFF);
+            ems.writeByte(addrHi, (byte) (value >> 8) & 0xFF);
+            return;
+        }
+        if (cpu != null) {
+            if ((permissions[addrLo] & Memory.PERMISSION_WRITE) == 0)
+                cpu.delegate.invalidMemoryAccess(new SegOfs(segOfs.getSegment(), (short) ofsLo), Memory.PERMISSION_WRITE);
+            if ((permissions[addrHi] & Memory.PERMISSION_WRITE) == 0)
+                cpu.delegate.invalidMemoryAccess(new SegOfs(segOfs.getSegment(), (short) ofsHi), Memory.PERMISSION_WRITE);
+            if (cpu.hasWatchpoints) {
+                cpu.checkMemoryWriteWatchpoint(new SegOfs(segOfs.getSegment(), (short) ofsLo));
+                cpu.checkMemoryWriteWatchpoint(new SegOfs(segOfs.getSegment(), (short) ofsHi));
+            }
+        }
+        buf[addrLo] = (byte) value;
+        buf[addrHi] = (byte) (value >> 8);
     }
 
     public String hexDump(short segment, short offset, int length) {

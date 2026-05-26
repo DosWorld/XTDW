@@ -93,6 +93,7 @@ public class Tests implements CPUDelegate {
             reg.SS.setValue(testDTO.before.regs.SS.shortValue());
             reg.ES.setValue(testDTO.before.regs.ES.shortValue());
             reg.flags.setValue16(testDTO.before.regs.flags.shortValue());
+            cpu.syncSegmentBases();
 
             for (int i = 0; i < testDTO.before.memory.size(); i++) {
                 final List<Integer> linearAddressValue = testDTO.before.memory.get(i);

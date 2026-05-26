@@ -41,7 +41,7 @@ public class Group5Instructions {
                 cpu.push16(cpu.reg.CS.getValue());
                 cpu.push16(cpu.reg.IP.getValue());
                 cpu.reg.IP.setValue(offset);
-                cpu.reg.CS.setValue(segment);
+                cpu.setCS(segment);
                 break;
             }
             case 4: { // JMP r/m16 - Jump near indirect.
@@ -55,7 +55,7 @@ public class Group5Instructions {
                 segOfs.addOffset((short) 2);
                 final short segment = cpu.memory.readWord(segOfs);
                 cpu.reg.IP.setValue(offset);
-                cpu.reg.CS.setValue(segment);
+                cpu.setCS(segment);
                 break;
             }
             case 6: { // PUSH m16 - Push memory word. (Also appears to be PUSH r/m16 - can be a register like AX).

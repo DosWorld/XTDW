@@ -153,7 +153,7 @@ public class Interrupts {
             } else if (parameter.getType() == int.class) {
                 final Reg16 hi = annotationToReg16(cpu, annotations[0]);
                 final Reg16 lo = annotationToReg16(cpu, annotations[1]);
-                final int value = (hi.getValue() << 16 & 0xFFFF) | (lo.getValue() & 0xFFFF);
+                final int value = ((hi.getValue() & 0xFFFF) << 16) | (lo.getValue() & 0xFFFF);
                 debugBuf.append(String.format("%s,%s=%08X", hi.getName(), lo.getName(), value));
                 args[p] = value;
             } else if (parameter.getType() == SegOfs.class) {

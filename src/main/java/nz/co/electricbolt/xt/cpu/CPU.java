@@ -25,12 +25,16 @@ public class CPU {
     boolean repeat;
     Boolean repeatFlag;
     long instructionCount;
+    int csBase;  // (CS & 0xFFFF) << 4, kept in sync with reg.CS
+    int ssBase;  // (SS & 0xFFFF) << 4, kept in sync with reg.SS
 
     private long maxInstructions = -1;
     private List<Breakpoint> breakpoints = new ArrayList<>();
+    private boolean hasBreakpoints = false;
     private boolean breakpointReached = false;
     private boolean traceMode = false;
     private List<Watchpoint> watchpoints = new ArrayList<>();
+    boolean hasWatchpoints = false;
     private boolean watchpointReached = false;
     private final FPU8087 fpu;
     private final Disassembler disassembler;
@@ -55,6 +59,24 @@ public class CPU {
 
     public RegSet getReg() {
         return reg;
+    }
+
+    /** Sets CS and updates csBase cache. Use instead of reg.CS.setValue() everywhere. */
+    public void setCS(short value) {
+        reg.CS.setValue(value);
+        csBase = (value & 0xFFFF) << 4;
+    }
+
+    /** Sets SS and updates ssBase cache. Use instead of reg.SS.setValue() everywhere. */
+    public void setSS(short value) {
+        reg.SS.setValue(value);
+        ssBase = (value & 0xFFFF) << 4;
+    }
+
+    /** Resync csBase/ssBase after external code writes reg.CS or reg.SS directly. */
+    public void syncSegmentBases() {
+        csBase = (reg.CS.getValue() & 0xFFFF) << 4;
+        ssBase = (reg.SS.getValue() & 0xFFFF) << 4;
     }
 
     public void execute() {
@@ -235,7 +257,7 @@ public class CPU {
                 push16(reg.SS.getValue());
                 break;
             case (byte) 0x17:
-                reg.SS.setValue(pop16());
+                setSS(pop16());
                 break;
             case (byte) 0x1E:
                 push16(reg.DS.getValue());
@@ -773,7 +795,7 @@ public class CPU {
                 final short segment = fetch16();
                 push16(reg.CS.getValue());
                 push16(reg.IP.getValue());
-                reg.CS.setValue(segment);
+                setCS(segment);
                 reg.IP.setValue(offset);
                 break;
             }
@@ -790,13 +812,13 @@ public class CPU {
             case (byte) 0xCA: {
                 final short additionalPopBytes = fetch16();
                 reg.IP.setValue(pop16());
-                reg.CS.setValue(pop16());
+                setCS(pop16());
                 reg.SP.add(additionalPopBytes);
                 break;
             }
             case (byte) 0xCB: {
                 reg.IP.setValue(pop16());
-                reg.CS.setValue(pop16());
+                setCS(pop16());
                 break;
             }
             case (byte) 0xC4:
@@ -910,7 +932,7 @@ public class CPU {
                 final short ip = fetch16();
                 final short cs = fetch16();
                 reg.IP.setValue(ip);
-                reg.CS.setValue(cs);
+                setCS(cs);
                 break;
             }
             case (byte) 0xEB: {
@@ -935,7 +957,7 @@ public class CPU {
             case (byte) 0xDD:
             case (byte) 0xDE:
             case (byte) 0xDF:
-                byte modRMByte = memory.fetchByte(new SegOfs(reg.CS, reg.IP));
+                byte modRMByte = memory.buf[(csBase + (reg.IP.getValue() & 0xFFFF)) & 0xFFFFF];
                 reg.IP.add((short) 1);
                 fpu.execute(opcode & 0xFF, modRMByte & 0xFF);
                 break;
@@ -945,14 +967,18 @@ public class CPU {
     }
 
     byte fetch8() {
-        final byte result = memory.fetchByte(new SegOfs(reg.CS, reg.IP));
+        int addr = (csBase + (reg.IP.getValue() & 0xFFFF)) & 0xFFFFF;
+        final byte result = memory.buf[addr];
         delegate.fetched8(result, instructionCount);
         reg.IP.add((short) 1);
         return result;
     }
 
     short fetch16() {
-        final short result = memory.fetchWord(new SegOfs(reg.CS, reg.IP));
+        int ip = reg.IP.getValue() & 0xFFFF;
+        int addrLo = (csBase + ip) & 0xFFFFF;
+        int addrHi = (csBase + ((ip + 1) & 0xFFFF)) & 0xFFFFF;
+        final short result = (short) ((memory.buf[addrHi] & 0xFF) << 8 | memory.buf[addrLo] & 0xFF);
         delegate.fetched16(result, instructionCount);
         reg.IP.add((short) 2);
         return result;
@@ -972,7 +998,7 @@ public class CPU {
 
     public void iret() {
         reg.IP.setValue(pop16());
-        reg.CS.setValue(pop16());
+        setCS(pop16());
         popf();
     }
 
@@ -983,8 +1009,9 @@ public class CPU {
 
         reg.flags.setTrapEnabled(false);
         reg.flags.setInterruptEnabled(false);
-        reg.CS.setValue((memory.getWord(new SegOfs((short) 0, (short) ((4 * (interrupt & 0xFF)) + 2)))));
-        reg.IP.setValue((memory.getWord(new SegOfs((short) 0, (short) (4 * (interrupt & 0xFF))))));
+        int ivtBase = 4 * (interrupt & 0xFF);
+        setCS(memory.getWord(new SegOfs((short) 0, (short) (ivtBase + 2))));
+        reg.IP.setValue(memory.getWord(new SegOfs((short) 0, (short) ivtBase)));
     }
 
     void loadSeg(Reg16 segReg) {
@@ -997,11 +1024,18 @@ public class CPU {
 
     void push16(short value) {
         reg.SP.add((short) -2);
-        memory.writeWord(new SegOfs(reg.SS, reg.SP), value);
+        int sp = reg.SP.getValue() & 0xFFFF;
+        int addrLo = (ssBase + sp) & 0xFFFFF;
+        int addrHi = (ssBase + ((sp + 1) & 0xFFFF)) & 0xFFFFF;
+        memory.buf[addrLo] = (byte) value;
+        memory.buf[addrHi] = (byte) (value >> 8);
     }
 
     public short pop16() {
-        final short result = memory.readWord(new SegOfs(reg.SS, reg.SP));
+        int sp = reg.SP.getValue() & 0xFFFF;
+        int addrLo = (ssBase + sp) & 0xFFFFF;
+        int addrHi = (ssBase + ((sp + 1) & 0xFFFF)) & 0xFFFFF;
+        final short result = (short) ((memory.buf[addrHi] & 0xFF) << 8 | memory.buf[addrLo] & 0xFF);
         reg.SP.add((short) 2);
         return result;
     }
@@ -1014,6 +1048,7 @@ public class CPU {
     }
 
     private boolean checkBreakpoint() {
+        if (!hasBreakpoints) return false;
         short currentCS = reg.CS.getValue();
         short currentIP = reg.IP.getValue();
         for (Breakpoint bp : breakpoints) {
@@ -1039,6 +1074,7 @@ public class CPU {
 
     public void setBreakpoints(List<Breakpoint> breakpoints) {
         this.breakpoints = breakpoints;
+        this.hasBreakpoints = !breakpoints.isEmpty();
     }
 
     public boolean isBreakpointReached() {
@@ -1141,7 +1177,7 @@ public class CPU {
     }
 
     private void checkWatchpoint(SegOfs address, Watchpoint.Type accessType) {
-        if (watchpoints == null) return;
+        if (!hasWatchpoints) return;
         for (Watchpoint wp : watchpoints) {
             if (!wp.isHit() && wp.check(this, accessType, address)) {
                 wp.setHit(true);
@@ -1159,6 +1195,7 @@ public class CPU {
 
     public void setWatchpoints(List<Watchpoint> watchpoints) {
         this.watchpoints = watchpoints;
+        this.hasWatchpoints = !watchpoints.isEmpty();
     }
 
     public boolean isWatchpointReached() {

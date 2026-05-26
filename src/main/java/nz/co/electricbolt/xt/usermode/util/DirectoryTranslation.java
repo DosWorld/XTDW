@@ -20,7 +20,19 @@ public class DirectoryTranslation {
     }
 
     public String emulatedPathToHostPath(String path) {
-        if (path.startsWith("C:")) {
+        if (path.charAt(1) == ':') {
+            path = path.substring(2);
+        }
+        path = path.replace('\\', File.separatorChar);
+        if (path.startsWith(File.separator)) {
+            path = path.substring(1);
+        }
+        path = workingDirectory + path;
+        return path;
+    }
+
+    public String emulatedLfnPathToHostPath(String path) {
+        if (path.charAt(1) == ':') {
             path = path.substring(2);
         }
         path = path.replace('\\', File.separatorChar);
