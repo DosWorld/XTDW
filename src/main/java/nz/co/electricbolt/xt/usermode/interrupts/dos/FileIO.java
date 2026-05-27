@@ -307,33 +307,186 @@ public class FileIO {
     public void findFirstMatchingFile(final CPU cpu, final Trace trace, final DirectoryTranslation directoryTranslation,
                                       final @AL byte appendFlag, final @ASCIZ @DS @DX String path,
                                       final @CX short attributeMask) {
-        String directory = getDirectoryFromPath(path);
-        final String filename = getFilenameFromPath(path);
+        final String upperPath = path.toUpperCase();
+        final String emulatedDirectory = getDirectoryFromPath(upperPath);
+        final String filenamePattern = getFilenameFromPath(upperPath);
+        final String hostDirectory = directoryTranslation.emulatedPathToHostPath(
+                emulatedDirectory.isEmpty() ? directoryTranslation.getCurrentEmulatedDirectory() : emulatedDirectory);
+        trace.interrupt("Host path " + hostDirectory + " filename " + filenamePattern);
 
-        directory = directoryTranslation.emulatedPathToHostPath(directory.toUpperCase());
-        trace.interrupt("Host path " + directory + " filename " + filename);
+        final byte attrMaskByte = (byte) (attributeMask & 0xFF);
+        final byte driveLetter = extractDriveLetter(upperPath, directoryTranslation);
 
-        final WildcardFileMatcher matcher = new WildcardFileMatcher(filename.toUpperCase());
-        final File[] files = new File(directory).listFiles(file -> {
-            return matcher.matches(file.getName());
-        });
+        final File hostDir = new File(hostDirectory);
+        final WildcardFileMatcher matcher = new WildcardFileMatcher(filenamePattern);
+        final File[] candidates = hostDir.listFiles();
+        if (candidates == null) {
+            setErrorResult(cpu, trace, ErrorCode.PathNotFound);
+            return;
+        }
 
-        if (files == null || files.length == 0) {
+        final java.util.List<File> matched = new java.util.ArrayList<>();
+        for (final File f : candidates) {
+            final String upperName = f.getName().toUpperCase();
+            if (!matcher.matches(upperName))
+                continue;
+            if (!attributeAllowed(getDosAttribute(f), attrMaskByte))
+                continue;
+            matched.add(f);
+        }
+        // "." and ".." are not listed by File.listFiles(), so synthesize them
+        // when the caller asked for directories and the wildcard would match.
+        if ((attrMaskByte & FileAttribute.directory) != 0) {
+            if (matcher.matches(".") && hostDir.isDirectory())
+                matched.add(0, new File(hostDir, "."));
+            if (matcher.matches("..") && hostDir.getParentFile() != null)
+                matched.add(matcher.matches(".") ? 1 : 0, new File(hostDir, ".."));
+        }
+
+        if (matched.isEmpty()) {
             setErrorResult(cpu, trace, ErrorCode.FileNotFound);
             return;
         }
 
-        final DiskTransferArea dta = new DiskTransferArea(cpu.getMemory(), (short) 0x0090, (short) 0x0080);
-        final FileDateTime fileDateTime = new FileDateTime(files[0].lastModified());
-        dta.writeFileDate(fileDateTime.toDOSDate());
-        dta.writeFileTime(fileDateTime.toDOSTime());
-        dta.writeFileSize((int) files[0].length());
-        dta.writeFilename(files[0].getName());
+        final File[] files = matched.toArray(new File[0]);
+        final SegOfs dtaAddress = diskTransferArea.copy();
+        final String template = toSearchTemplate(filenamePattern);
+        final FindFileData data = new FindFileData(findFileCount, files, (short) 0,
+                attrMaskByte, driveLetter, template, dtaAddress);
 
-        final FindFileData data = new FindFileData(findFileCount, files, (short) 0, dta);
+        final DiskTransferArea dta = new DiskTransferArea(cpu.getMemory(), dtaAddress.getSegment(), dtaAddress.getOffset());
+        dta.writeDriveLetter(driveLetter);
+        dta.writeSearchTemplate(template);
+        dta.writeSearchAttribute(attrMaskByte);
+        dta.writeParentCluster((short) 0);
+        dta.writeReserved();
+        writeMatchToDTA(dta, files[0]);
+
         findFileMap.put(findFileCount, data);
-        dta.setInternalId(findFileCount++);
+        dta.setInternalId(findFileCount);
+        findFileCount++;
         cpu.getReg().flags.setCarry(false);
+        cpu.getReg().AX.setValue((short) 0);
+    }
+
+    @Interrupt(function = 0x4F, description = "Find next matching file")
+    public void findNextMatchingFile(final CPU cpu, final Trace trace) {
+        final DiskTransferArea dta = new DiskTransferArea(cpu.getMemory(),
+                diskTransferArea.getSegment(), diskTransferArea.getOffset());
+        final short id = dta.getInternalId();
+        final FindFileData data = findFileMap.get(id);
+        if (data == null) {
+            trace.interrupt("Unknown FindFirst session id " + id);
+            setErrorResult(cpu, trace, ErrorCode.NoMoreFiles);
+            return;
+        }
+
+        final int nextIndex = (data.fileIndex() & 0xFFFF) + 1;
+        if (nextIndex >= data.files().length) {
+            trace.interrupt("Find session " + id + " exhausted");
+            findFileMap.remove(id);
+            setErrorResult(cpu, trace, ErrorCode.NoMoreFiles);
+            return;
+        }
+
+        writeMatchToDTA(dta, data.files()[nextIndex]);
+        findFileMap.put(id, data.advance());
+        cpu.getReg().flags.setCarry(false);
+        cpu.getReg().AX.setValue((short) 0);
+    }
+
+    private void writeMatchToDTA(final DiskTransferArea dta, final File file) {
+        final FileDateTime fileDateTime = new FileDateTime(file.lastModified());
+        dta.writeFileAttribute(getDosAttribute(file));
+        dta.writeFileTime(fileDateTime.toDOSTime());
+        dta.writeFileDate(fileDateTime.toDOSDate());
+        // ".", ".." and directories have an undefined size — DOS reports 0.
+        final long size = file.isDirectory() ? 0L : file.length();
+        dta.writeFileSize((int) size);
+        dta.writeFilename(file.getName().toUpperCase());
+    }
+
+    private static boolean attributeAllowed(final byte fileAttr, final byte mask) {
+        // Volume label is exclusive: a search with the volume-label bit set in
+        // the mask returns ONLY volume labels.
+        final boolean fileIsVolumeLabel = (fileAttr & FileAttribute.volumeLabel) != 0;
+        final boolean maskWantsVolumeLabel = (mask & FileAttribute.volumeLabel) != 0;
+        if (maskWantsVolumeLabel != fileIsVolumeLabel)
+            return false;
+        // Read-only (0x01) and archive (0x20) are always returned.
+        // Hidden (0x02), system (0x04) and directory (0x10) are returned only
+        // if their bit is set in the mask.
+        final int selectiveBits = FileAttribute.hidden | FileAttribute.system | FileAttribute.directory;
+        return (fileAttr & selectiveBits & ~mask) == 0;
+    }
+
+    private static byte getDosAttribute(final File file) {
+        byte attr = 0;
+        try {
+            final DosFileAttributeView dosView = Files.getFileAttributeView(file.toPath(), DosFileAttributeView.class);
+            if (dosView != null) {
+                final DosFileAttributes attrs = dosView.readAttributes();
+                if (attrs.isReadOnly())  attr |= FileAttribute.readOnly;
+                if (attrs.isHidden())    attr |= FileAttribute.hidden;
+                if (attrs.isSystem())    attr |= FileAttribute.system;
+                if (attrs.isDirectory()) attr |= FileAttribute.directory;
+                if (attrs.isArchive())   attr |= FileAttribute.archive;
+                return attr;
+            }
+            final BasicFileAttributes attrs = Files.readAttributes(file.toPath(), BasicFileAttributes.class);
+            if (attrs.isDirectory()) attr |= FileAttribute.directory;
+            else                     attr |= FileAttribute.archive;
+            if (!file.canWrite())    attr |= FileAttribute.readOnly;
+            if (file.isHidden())     attr |= FileAttribute.hidden;
+        } catch (IOException e) {
+            // Fall through with whatever bits we've already gathered.
+        }
+        return attr;
+    }
+
+    /**
+     * Converts a wildcard filename (e.g. {@code "FOO.TXT"} or {@code "*.C"})
+     * into the 11-byte 8.3 search template stored in the DTA: 8 bytes name
+     * padded with spaces, then 3 bytes extension padded with spaces, no dot.
+     * A trailing {@code *} expands to the remaining {@code ?}s in its field.
+     */
+    private static String toSearchTemplate(final String pattern) {
+        final int dot = pattern.indexOf('.');
+        final String name = dot < 0 ? pattern : pattern.substring(0, dot);
+        final String ext = dot < 0 ? "" : pattern.substring(dot + 1);
+        final StringBuilder sb = new StringBuilder(11);
+        appendTemplateField(sb, name, 8);
+        appendTemplateField(sb, ext, 3);
+        return sb.toString();
+    }
+
+    private static void appendTemplateField(final StringBuilder sb, final String field, final int width) {
+        int written = 0;
+        for (int i = 0; i < field.length() && written < width; i++) {
+            final char c = field.charAt(i);
+            if (c == '*') {
+                while (written < width) { sb.append('?'); written++; }
+                break;
+            }
+            sb.append(c);
+            written++;
+        }
+        while (written < width) { sb.append(' '); written++; }
+    }
+
+    private static byte extractDriveLetter(final String upperPath, final DirectoryTranslation dirTrans) {
+        if (upperPath.length() >= 2 && upperPath.charAt(1) == ':') {
+            final char c = upperPath.charAt(0);
+            if (c >= 'A' && c <= 'Z')
+                return (byte) (c - 'A' + 1);
+        }
+        final String cur = dirTrans.getCurrentEmulatedDirectory();
+        if (cur != null && cur.length() >= 2 && cur.charAt(1) == ':') {
+            final char c = Character.toUpperCase(cur.charAt(0));
+            if (c >= 'A' && c <= 'Z')
+                return (byte) (c - 'A' + 1);
+        }
+        return 3; // default C:
     }
 
     @Interrupt(function = 0x56, description = "Rename file")

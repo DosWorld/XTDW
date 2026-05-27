@@ -29,6 +29,6 @@ public class DiskTransferAreaTests {
             String hex = String.format("%02X", b & 0xFF);
             hexString.append(hex);
         }
-        assertEquals("AA341200000000000000000000000000000000000000008753EFCDAB07000048454C4F57524C442E45584500AA", hexString.toString());
+        assertEquals("AA0000000000000000000000000034120000000000000087537856EFCDAB0748454C4F57524C442E45584500AA", hexString.toString());
     }
 }
