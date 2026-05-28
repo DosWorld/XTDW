@@ -12,6 +12,8 @@ public class TerminateProgram {
 
     private static final Stack<SavedContext> contextStack = new Stack<>();
     private static short currentPSP = 0x0090;
+    private static byte lastExitCode = 0;
+    private static byte lastExitType = 0;
 
     public static short getCurrentPSP() {
         return currentPSP;
@@ -26,9 +28,8 @@ public class TerminateProgram {
         ctx.regs = cpu.getReg().clone();
         ctx.psp = new byte[256];
         ctx.savedPSP = currentPSP;
-        SegOfs psp = new SegOfs((short) 0x0090, (short) 0x0000);
         for (int i = 0; i < 256; i++) {
-            ctx.psp[i] = cpu.getMemory().readByte(new SegOfs(psp.getSegment(), (short)(psp.getOffset() + i)));
+            ctx.psp[i] = cpu.getMemory().readByte(new SegOfs(currentPSP, (short) i));
         }
         ctx.ss = cpu.getReg().SS.getValue();
         ctx.sp = cpu.getReg().SP.getValue();
@@ -42,9 +43,8 @@ public class TerminateProgram {
         cpu.getReg().SS.setValue(ctx.ss);
         cpu.getReg().SP.setValue(ctx.sp);
         cpu.syncSegmentBases();
-        SegOfs psp = new SegOfs((short) 0x0090, (short) 0x0000);
         for (int i = 0; i < 256; i++) {
-            cpu.getMemory().writeByte(new SegOfs(psp.getSegment(), (short)(psp.getOffset() + i)), ctx.psp[i]);
+            cpu.getMemory().writeByte(new SegOfs(currentPSP, (short) i), ctx.psp[i]);
         }
         if (ctx.childSegment != 0) {
             freeMemory(cpu, ctx.childSegment);
@@ -68,9 +68,10 @@ public class TerminateProgram {
 
     @Interrupt(interrupt = 0x20, function = 0x00, description = "Terminate program")
     public void terminate1(final CPU cpu) {
+        lastExitCode = 0;
+        lastExitType = 0;
         if (hasParent()) {
             popContext(cpu);
-            cpu.iret();
         } else {
             System.exit(0);
         }
@@ -78,9 +79,10 @@ public class TerminateProgram {
 
     @Interrupt(function = 0x00, description = "Terminate program")
     public void terminate2(final CPU cpu) {
+        lastExitCode = 0;
+        lastExitType = 0;
         if (hasParent()) {
             popContext(cpu);
-            cpu.iret();
         } else {
             System.exit(0);
         }
@@ -88,12 +90,21 @@ public class TerminateProgram {
 
     @Interrupt(function = 0x4C, description = "Terminate program with exit code")
     public void terminate3(final CPU cpu, final @AL byte exitCode) {
+        lastExitCode = exitCode;
+        lastExitType = 0;
         if (hasParent()) {
             popContext(cpu);
-            cpu.iret();
         } else {
             System.exit(cpu.getReg().AL.getValue());
         }
+    }
+
+    @Interrupt(function = 0x4D, description = "Get return code of subprocess")
+    public void getReturnCode(final CPU cpu) {
+        cpu.getReg().AL.setValue(lastExitCode);
+        cpu.getReg().AH.setValue(lastExitType);
+        lastExitCode = 0;
+        lastExitType = 0;
     }
 
     private static class SavedContext {

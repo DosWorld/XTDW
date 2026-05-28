@@ -52,6 +52,12 @@ public class FileIOLFN {
     @Interrupt(interrupt = 0x21, function = 0x71, subfunction = 0x3B, description = "Set current directory (LFN)")
     public void setCurrentDirectoryLFN(CPU cpu, Trace trace, DirectoryTranslation dirTrans,
                                         @ASCIZ @DS @DX String path) {
+        String hostPath = dirTrans.emulatedLfnPathToHostPath(path);
+        File dir = new File(hostPath);
+        if (!dir.exists() || !dir.isDirectory()) {
+            setErrorResult(cpu, trace, ErrorCode.PathNotFound);
+            return;
+        }
         dirTrans.setCurrentEmulatedDirectory(path);
         cpu.getReg().flags.setCarry(false);
     }

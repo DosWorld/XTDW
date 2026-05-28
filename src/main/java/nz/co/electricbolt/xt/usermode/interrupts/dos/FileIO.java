@@ -553,7 +553,13 @@ public class FileIO {
     @Interrupt(function = 0x3B, description = "Set current directory")
     public void setCurrentDirectory(final CPU cpu, final Trace trace, final DirectoryTranslation directoryTranslation,
                                     @ASCIZ @DS @DX String path) {
-        directoryTranslation.setCurrentEmulatedDirectory(path);
+        String hostPath = directoryTranslation.emulatedPathToHostPath(path.toUpperCase());
+        File dir = new File(hostPath);
+        if (!dir.exists() || !dir.isDirectory()) {
+            setErrorResult(cpu, trace, ErrorCode.PathNotFound);
+            return;
+        }
+        directoryTranslation.setCurrentEmulatedDirectory(path.toUpperCase());
         cpu.getReg().flags.setCarry(false);
     }
 

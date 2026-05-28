@@ -22,6 +22,32 @@ public class DirectoryTranslationTests {
     }
 
     @Test
+    public void emulatedPathToHostPathRelativeTests() {
+        final DirectoryTranslation dt = new DirectoryTranslation("/Users/matthew/Documents/");
+        dt.setCurrentEmulatedDirectory("C:\\TWD");
+        assertEquals("/Users/matthew/Documents/TWD", dt.emulatedPathToHostPath("C:\\TWD"));
+        assertEquals("/Users/matthew/Documents/TWD/FOO.TXT", dt.emulatedPathToHostPath("FOO.TXT"));
+        assertEquals("/Users/matthew/Documents/FOO.TXT", dt.emulatedPathToHostPath("..\\FOO.TXT"));
+        assertEquals("/Users/matthew/Documents/TWD/SUB/BAR.TXT", dt.emulatedPathToHostPath("SUB\\BAR.TXT"));
+        assertEquals("/Users/matthew/Documents/", dt.emulatedPathToHostPath("..\\"));
+        assertEquals("/Users/matthew/Documents/OTHER", dt.emulatedPathToHostPath("..\\OTHER"));
+    }
+
+    @Test
+    public void setCurrentEmulatedDirectoryTests() {
+        final DirectoryTranslation dt = new DirectoryTranslation("/Users/matthew/Documents/");
+        assertEquals("C:\\", dt.getCurrentEmulatedDirectory());
+        dt.setCurrentEmulatedDirectory("TWD");
+        assertEquals("C:\\TWD", dt.getCurrentEmulatedDirectory());
+        dt.setCurrentEmulatedDirectory("C:\\DEV\\TP6");
+        assertEquals("C:\\DEV\\TP6", dt.getCurrentEmulatedDirectory());
+        dt.setCurrentEmulatedDirectory("..");
+        assertEquals("C:\\DEV", dt.getCurrentEmulatedDirectory());
+        dt.setCurrentEmulatedDirectory("C:\\");
+        assertEquals("C:\\", dt.getCurrentEmulatedDirectory());
+    }
+
+    @Test
     public void hostPathToEmulatedPathTests() {
         final DirectoryTranslation directoryTranslation = new DirectoryTranslation("/Users/matthew/Documents/");
         assertEquals("C:\\Random\\Folder\\Structure", directoryTranslation.hostPathToEmulatedPath("/Random/Folder/Structure"));

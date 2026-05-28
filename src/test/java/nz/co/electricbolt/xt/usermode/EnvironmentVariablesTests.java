@@ -14,12 +14,12 @@ public class EnvironmentVariablesTests {
     public void environmentVariablesTests() {
         final Memory memory = new Memory(null);
         memory.setLinearByte(131071, (byte) 0xAA);
-        memory.setLinearByte(131093, (byte) 0xAA);
+        memory.setLinearByte(131101, (byte) 0xAA);
         final EnvironmentVariables env = new EnvironmentVariables(memory, (short) 0x2000, (short) 0x0000);
         env.writeVariable("PATH", "C:\\TEMP");
         env.writeExecutablePath("HELOWRLD.EXE");
 
-        final byte[] buf = memory.getLinearData(131071, 23);
+        final byte[] buf = memory.getLinearData(131071, 31);
         final StringBuilder hexString = new StringBuilder();
         for (byte b : buf) {
             String hex = String.format("%02X", b & 0xFF);
@@ -36,7 +36,7 @@ public class EnvironmentVariablesTests {
         env.writeVariable("KEY", "VALUE");
         env.writeExecutablePath("PROG.EXE");
 
-        final byte[] buf = memory.getLinearData(0x20000, 26);
+        final byte[] buf = memory.getLinearData(0x20000, 31);
         final StringBuilder hexString = new StringBuilder();
         for (byte b : buf) {
             String hex = String.format("%02X", b & 0xFF);

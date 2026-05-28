@@ -1022,7 +1022,7 @@ public class CPU {
         segReg.setValue(memory.readWord(segOfs));
     }
 
-    void push16(short value) {
+    public void push16(short value) {
         reg.SP.add((short) -2);
         int sp = reg.SP.getValue() & 0xFFFF;
         int addrLo = (ssBase + sp) & 0xFFFFF;

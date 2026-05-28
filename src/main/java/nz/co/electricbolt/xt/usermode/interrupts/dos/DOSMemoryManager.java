@@ -182,8 +182,7 @@ public class DOSMemoryManager {
             // No need to change marker
         }
         
-        // Set owner PID (get current PSP segment - from DS or ES)
-        short currentPSP = cpu.getReg().DS.getValue(); // DS typically points to PSP
+        short currentPSP = TerminateProgram.getCurrentPSP();
         cpu.getMemory().writeWord(new SegOfs(allocatedSegment, MCB_PID), currentPSP);
         
         // Success — return the first usable paragraph (one past the MCB)

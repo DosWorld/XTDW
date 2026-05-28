@@ -8,7 +8,8 @@ import nz.co.electricbolt.xt.usermode.util.DirectoryTranslation;
 import nz.co.electricbolt.xt.usermode.util.Trace;
 
 import java.io.File;
-import java.util.Stack;
+import java.io.FileInputStream;
+import java.io.IOException;
 
 public class Exec {
 
@@ -25,8 +26,8 @@ public class Exec {
 
         short envSegment = cpu.getMemory().readWord(parameterBlock);
         SegOfs cmdLinePtr = new SegOfs(
-            cpu.getMemory().readWord(new SegOfs(parameterBlock.getSegment(), (short)(parameterBlock.getOffset() + 2))),
-            cpu.getMemory().readWord(new SegOfs(parameterBlock.getSegment(), (short)(parameterBlock.getOffset() + 4)))
+            cpu.getMemory().readWord(new SegOfs(parameterBlock.getSegment(), (short)(parameterBlock.getOffset() + 4))),
+            cpu.getMemory().readWord(new SegOfs(parameterBlock.getSegment(), (short)(parameterBlock.getOffset() + 2)))
         );
         byte cmdLen = cpu.getMemory().readByte(cmdLinePtr);
         byte[] cmdBuf = new byte[cmdLen];
@@ -35,15 +36,41 @@ public class Exec {
         }
         String commandLine = new String(cmdBuf).trim();
 
+        // Minimum paragraphs the child needs: PSP (0x10) + image size + min_alloc
+        // (or, for COM, PSP + 0x10 paragraphs of stack space at minimum).
+        int minParagraphs = computeMinimumParagraphs(file);
+        if (minParagraphs < 0) {
+            cpu.getReg().flags.setCarry(true);
+            cpu.getReg().AX.setValue((short) 0x000B); // invalid format
+            return;
+        }
+
         TerminateProgram.pushContext(cpu);
 
-        short parentPSP = cpu.getReg().DS.getValue();
+        short parentPSP = TerminateProgram.getCurrentPSP();
         short parentEnv = cpu.getMemory().readWord(new SegOfs(parentPSP, (short) 0x002C));
 
-        long fileSize = file.length();
-        short paragraphsNeeded = (short) (((fileSize + 256 + 15) / 16) + 1);
+        // Real DOS gives the child the largest free block. Probe it with
+        // INT 21h/AH=48h BX=FFFFh (always returns CF=1, BX=largest), then
+        // allocate that size. The MCB owner is set from currentPSP at the
+        // moment of allocation, so we need to know childPSP first — but
+        // allocation itself determines childPSP. Resolution: allocate with
+        // parent ownership, then patch the MCB owner to childPSP below.
         short[] allocatedSegment = new short[1];
-        allocateMemory(cpu, paragraphsNeeded, allocatedSegment);
+        short[] allocatedParagraphs = new short[1];
+        cpu.getReg().BX.setValue((short) 0xFFFF);
+        Memory.allocateMemoryBlockStatic(cpu, cpu.getReg().BX.getValue());
+        // Probe always sets carry; BX holds the largest free block size.
+        int largest = cpu.getReg().BX.getValue() & 0xFFFF;
+        if (largest < minParagraphs) {
+            TerminateProgram.popContext(cpu);
+            cpu.getReg().flags.setCarry(true);
+            cpu.getReg().AX.setValue((short) 0x0008); // insufficient memory
+            cpu.getReg().BX.setValue((short) largest);
+            return;
+        }
+        allocatedParagraphs[0] = (short) largest;
+        allocateMemory(cpu, allocatedParagraphs[0], allocatedSegment);
         if (cpu.getReg().flags.isCarry()) {
             TerminateProgram.popContext(cpu);
             return;
@@ -51,12 +78,17 @@ public class Exec {
 
         short childPSP = allocatedSegment[0];
 
+        // Patch MCB owner so the child owns its own block (allocateMemory
+        // recorded parent's PSP because currentPSP hadn't switched yet).
+        cpu.getMemory().writeWord(new SegOfs((short) (childPSP - 1), (short) 0x0001), childPSP);
+
         for (int i = 0; i < 256; i++) {
             cpu.getMemory().writeByte(new SegOfs(childPSP, (short) i), (byte) 0);
         }
+        short topOfMemory = (short) (childPSP + allocatedParagraphs[0]);
         cpu.getMemory().writeWord(new SegOfs(childPSP, (short) 0x002C), envSegment != 0 ? envSegment : parentEnv);
-        cpu.getMemory().writeWord(new SegOfs(childPSP, (short) 0x0002), (short) 0x0090);
-        cpu.getMemory().writeWord(new SegOfs(childPSP, (short) 0x0004), (short) 0x0090);
+        cpu.getMemory().writeWord(new SegOfs(childPSP, (short) 0x0002), topOfMemory);
+        cpu.getMemory().writeWord(new SegOfs(childPSP, (short) 0x0016), parentPSP);
         cpu.getMemory().writeWord(new SegOfs(childPSP, (short) 0x0006), (short) 0xFFFF);
         cpu.getMemory().writeWord(new SegOfs(childPSP, (short) 0x0008), (short) 0xFFFF);
 
@@ -66,11 +98,20 @@ public class Exec {
             cpu.getMemory().writeByte(new SegOfs(cmdLine.getSegment(), (short)(cmdLine.getOffset() + 1 + i)), (byte) commandLine.charAt(i));
         }
 
+        // Switch currentPSP before loading so allocator activity during load
+        // attributes ownership to the child, and so an abort during load can
+        // be cleaned up via popContext.
+        TerminateProgram.setChildSegment(childPSP);
+        TerminateProgram.setCurrentPSP(childPSP);
+
         ProgramLoader loader = new ProgramLoader(cpu);
         loader.load(filename, childPSP);
 
-        TerminateProgram.setChildSegment(childPSP);
-        TerminateProgram.setCurrentPSP(childPSP);
+        // Push an IRET frame (flags, CS, IP) onto the child's stack so that the
+        // iret() in CPU.step() pops the child's entry point correctly.
+        cpu.push16(cpu.getReg().flags.getValue16());
+        cpu.push16(cpu.getReg().CS.getValue());
+        cpu.push16(cpu.getReg().IP.getValue());
 
         cpu.getReg().flags.setCarry(false);
         cpu.getReg().AX.setValue((short) 0x0000);
@@ -82,5 +123,34 @@ public class Exec {
         if (!cpu.getReg().flags.isCarry()) {
             result[0] = cpu.getReg().AX.getValue();
         }
+    }
+
+    // PSP (0x10 paragraphs) + image + min_alloc for EXE, or 0x1000 paragraphs
+    // (full 64 KB segment) for COM so the stack at offset 0xFFFF has room.
+    // Returns -1 on read error. Parses only the EXE header fields it needs to
+    // avoid taking a cross-package dependency on the loader's EXEHeader.
+    private int computeMinimumParagraphs(File file) {
+        try (FileInputStream fis = new FileInputStream(file)) {
+            byte[] buf = new byte[0x1C];
+            int n = fis.read(buf);
+            if (n < 0x1C || buf[0x00] != 'M' || buf[0x01] != 'Z') {
+                return 0x1000;
+            }
+            int lastBlockSize = word(buf, 0x02);
+            int numberOfBlocks = word(buf, 0x04);
+            int headerParagraphs = word(buf, 0x08);
+            int minAlloc = word(buf, 0x0A);
+            int totalFileSize = (lastBlockSize == 0)
+                ? numberOfBlocks * 512
+                : (numberOfBlocks - 1) * 512 + lastBlockSize;
+            int codeParagraphs = ((totalFileSize - headerParagraphs * 16) + 15) >> 4;
+            return 0x10 + codeParagraphs + minAlloc;
+        } catch (IOException e) {
+            return -1;
+        }
+    }
+
+    private static int word(byte[] buf, int offset) {
+        return (buf[offset] & 0xFF) | ((buf[offset + 1] & 0xFF) << 8);
     }
 }
