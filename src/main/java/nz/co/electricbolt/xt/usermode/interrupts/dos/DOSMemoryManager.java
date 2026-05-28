@@ -353,6 +353,28 @@ public class DOSMemoryManager {
     public short getFirstMCBSegment() {
         return firstMCBSegment;
     }
+
+    // Real DOS, on program termination, releases every MCB owned by the dying PSP
+    // (not just the PSP block itself). Without this, any block the child allocated
+    // via INT 21h/48h survives the child and accumulates across consecutive Execs
+    // until the parent gets "insufficient memory" on the next spawn.
+    public void freeBlocksOwnedBy(short ownerPSP) {
+        if (!initialized) return;
+        short seg = firstMCBSegment;
+        while (true) {
+            byte marker = cpu.getMemory().readByte(new SegOfs(seg, MCB_MARKER));
+            short pid = cpu.getMemory().readWord(new SegOfs(seg, MCB_PID));
+            short blockSize = cpu.getMemory().readWord(new SegOfs(seg, MCB_SIZE));
+            if (pid == ownerPSP) {
+                cpu.getMemory().writeWord(new SegOfs(seg, MCB_PID), (short) 0);
+            }
+            if (marker == MCB_LAST) break;
+            int next = (seg & 0xFFFF) + (blockSize & 0xFFFF) + 1;
+            if (next >= 0xA000) break;
+            seg = (short) next;
+        }
+        mergeFreeBlocks();
+    }
     
     /**
      * Check if the memory manager is initialized

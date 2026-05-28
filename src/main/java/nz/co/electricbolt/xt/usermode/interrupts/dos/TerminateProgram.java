@@ -38,6 +38,7 @@ public class TerminateProgram {
 
     public static void popContext(CPU cpu) {
         SavedContext ctx = contextStack.pop();
+        short childPSP = ctx.childSegment;
         currentPSP = ctx.savedPSP;
         cpu.getReg().setFrom(ctx.regs);
         cpu.getReg().SS.setValue(ctx.ss);
@@ -46,8 +47,12 @@ public class TerminateProgram {
         for (int i = 0; i < 256; i++) {
             cpu.getMemory().writeByte(new SegOfs(currentPSP, (short) i), ctx.psp[i]);
         }
-        if (ctx.childSegment != 0) {
-            freeMemory(cpu, ctx.childSegment);
+        if (childPSP != 0) {
+            // Free every MCB the child owned (PSP block + AH=48 allocations),
+            // matching real DOS termination semantics. Without this, large
+            // children that allocate working heaps leak that memory across
+            // consecutive Exec calls.
+            Memory.freeBlocksOwnedByStatic(childPSP);
         }
     }
 
@@ -59,11 +64,6 @@ public class TerminateProgram {
 
     public static boolean hasParent() {
         return !contextStack.isEmpty();
-    }
-
-    private static void freeMemory(CPU cpu, short segment) {
-        cpu.getReg().ES.setValue(segment);
-        Memory.freeAllocatedMemoryBlockStatic(cpu, cpu.getReg().ES.getValue());
     }
 
     @Interrupt(interrupt = 0x20, function = 0x00, description = "Terminate program")

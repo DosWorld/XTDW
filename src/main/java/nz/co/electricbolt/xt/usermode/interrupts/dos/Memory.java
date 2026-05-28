@@ -64,8 +64,22 @@ public class Memory {
         memoryManager.freeMemory(cpu, segment);
     }
 
+    public static void resizeMemoryBlockStatic(CPU cpu, short dataSeg, short newSize) {
+        if (memoryManager == null || !memoryManager.isInitialized()) {
+            cpu.getReg().flags.setCarry(true);
+            cpu.getReg().AX.setValue((byte) 0x01);
+            return;
+        }
+        memoryManager.resizeMemory(cpu, dataSeg, newSize);
+    }
+
     public static void releaseUnusedMemoryAfterLoad(short pspSegment, short ssSegment, short spValue) {
         if (memoryManager == null || !memoryManager.isInitialized()) return;
         memoryManager.releaseUnusedMemoryAfterLoad(pspSegment, ssSegment, spValue);
+    }
+
+    public static void freeBlocksOwnedByStatic(short ownerPSP) {
+        if (memoryManager == null || !memoryManager.isInitialized()) return;
+        memoryManager.freeBlocksOwnedBy(ownerPSP);
     }
 }

@@ -107,6 +107,20 @@ public class Exec {
         ProgramLoader loader = new ProgramLoader(cpu);
         loader.load(filename, childPSP);
 
+        // Shrink the child's block to (image + stack) and release the tail as a
+        // free block, mirroring what ProgramRunner does for the top-level program.
+        // Without this, a child that probes free memory with INT 21h/AH=48 BX=FFFFh
+        // before calling AH=4Ah sees no free blocks and gets BX=0.
+        int stackTopParagraph = (cpu.getReg().SS.getValue() & 0xFFFF)
+            + (((cpu.getReg().SP.getValue() & 0xFFFF) + 15) >> 4);
+        int childParagraphs = stackTopParagraph - (childPSP & 0xFFFF);
+        if (childParagraphs < 1) childParagraphs = 1;
+        if (childParagraphs < (allocatedParagraphs[0] & 0xFFFF)) {
+            Memory.resizeMemoryBlockStatic(cpu, childPSP, (short) childParagraphs);
+            cpu.getMemory().writeWord(new SegOfs(childPSP, (short) 0x0002),
+                (short) (childPSP + childParagraphs));
+        }
+
         // Push an IRET frame (flags, CS, IP) onto the child's stack so that the
         // iret() in CPU.step() pops the child's entry point correctly.
         cpu.push16(cpu.getReg().flags.getValue16());

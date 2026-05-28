@@ -231,6 +231,145 @@ class DOSMemoryManagerTests {
         assertTrue(bx >= 0x0201, "BX must return maximum possible growth size (got " + Integer.toHexString(bx) + ")");
     }
 
+    /**
+     * Regression: a child loaded via INT 21h AH=4B00h (Exec) gets allocated the largest
+     * free block. After the child shrinks that block down to its image+stack, a probe
+     * with BX=FFFFh inside the child must return BX = paragraphs released, not BX=0.
+     */
+    @Test
+    void postExecChildProbe_returnsFreedTail() {
+        // Parent setup: cold-boot release.
+        mgr.releaseUnusedMemoryAfterLoad(PSP_SEGMENT, (short) 0x0146, (short) 0x1FFE);
+
+        // Exec path: probe + allocate the largest block for the child.
+        cpu.getReg().DS.setValue(PSP_SEGMENT);
+        mgr.allocateMemory(cpu, (short) 0xFFFF);
+        assertTrue(cpu.getReg().flags.isCarry());
+        short largest = cpu.getReg().BX.getValue();
+        int largestU = largest & 0xFFFF;
+        assertTrue(largestU > 0);
+
+        mgr.allocateMemory(cpu, largest);
+        assertFalse(cpu.getReg().flags.isCarry(), "Exec must be able to allocate the largest block");
+        short childPSP = cpu.getReg().AX.getValue();
+
+        // Exec post-load: shrink the child's block to image+stack.
+        int childParagraphs = 0x0200;
+        assertTrue(childParagraphs < largestU);
+        mgr.resizeMemory(cpu, childPSP, (short) childParagraphs);
+        assertFalse(cpu.getReg().flags.isCarry(), "shrink must succeed");
+
+        // Inside the child: probe must return BX = released tail (not 0).
+        mgr.allocateMemory(cpu, (short) 0xFFFF);
+        assertTrue(cpu.getReg().flags.isCarry());
+        assertEquals((short) 0x0008, cpu.getReg().AX.getValue());
+        int bx = cpu.getReg().BX.getValue() & 0xFFFF;
+        int expected = largestU - childParagraphs - 1; // minus one MCB
+        assertEquals(expected, bx, "probe inside child must see the released tail");
+    }
+
+    /**
+     * Regression: on child termination, every MCB owned by the child's PSP must be
+     * freed — not just the child's PSP block. Without this fix, a child that
+     * allocates a working heap via AH=48 leaks that heap when it exits, and
+     * consecutive Execs of large children eventually exhaust conventional memory.
+     */
+    @Test
+    void freeBlocksOwnedBy_freesAllChildAllocations() {
+        mgr.releaseUnusedMemoryAfterLoad(PSP_SEGMENT, (short) 0x0146, (short) 0x1FFE);
+        cpu.getReg().DS.setValue(PSP_SEGMENT);
+
+        // Simulate child PSP allocation (large block).
+        mgr.allocateMemory(cpu, (short) 0xFFFF);
+        short largest = cpu.getReg().BX.getValue();
+        mgr.allocateMemory(cpu, largest);
+        assertFalse(cpu.getReg().flags.isCarry());
+        short childPSP = cpu.getReg().AX.getValue();
+        // Mirror Exec.java: patch the PSP block's MCB owner to childPSP so that
+        // termination's free-by-owner sweep reclaims it.
+        cpu.getMemory().writeWord(new nz.co.electricbolt.xt.cpu.SegOfs((short)(childPSP - 1), (short) 0x0001), childPSP);
+
+        // Child shrinks its PSP block, leaving room in the chain.
+        mgr.resizeMemory(cpu, childPSP, (short) 0x0200);
+        assertFalse(cpu.getReg().flags.isCarry());
+
+        // Re-point currentPSP to the child for subsequent allocations to be owned by it.
+        // The static getCurrentPSP() reads from TerminateProgram, which defaults to 0x0090.
+        // We can't easily change it here, so simulate by directly stamping the MCB owner.
+        // Instead: allocate two blocks while pretending to be the child by patching ownership.
+        mgr.allocateMemory(cpu, (short) 0x0100);
+        assertFalse(cpu.getReg().flags.isCarry());
+        short child1 = cpu.getReg().AX.getValue();
+        // Patch MCB owner to childPSP
+        cpu.getMemory().writeWord(new nz.co.electricbolt.xt.cpu.SegOfs((short)(child1 - 1), (short) 0x0001), childPSP);
+
+        mgr.allocateMemory(cpu, (short) 0x0100);
+        assertFalse(cpu.getReg().flags.isCarry());
+        short child2 = cpu.getReg().AX.getValue();
+        cpu.getMemory().writeWord(new nz.co.electricbolt.xt.cpu.SegOfs((short)(child2 - 1), (short) 0x0001), childPSP);
+
+        // Probe free memory before "termination".
+        mgr.allocateMemory(cpu, (short) 0xFFFF);
+        int freeBeforeTerminate = cpu.getReg().BX.getValue() & 0xFFFF;
+
+        // Terminate: free everything owned by childPSP.
+        mgr.freeBlocksOwnedBy(childPSP);
+
+        // Probe free memory after termination. It must include the PSP block,
+        // both auxiliary allocations, and their MCB overhead.
+        mgr.allocateMemory(cpu, (short) 0xFFFF);
+        int freeAfterTerminate = cpu.getReg().BX.getValue() & 0xFFFF;
+
+        // Sanity: more free memory after than before.
+        assertTrue(freeAfterTerminate > freeBeforeTerminate,
+            "free memory after termination must exceed free memory before (before=" + freeBeforeTerminate
+                + " after=" + freeAfterTerminate + ")");
+
+        // The merged free block must be at least as large as the original probe size.
+        // (Originally we got `largest` paragraphs; after shrink+two extra allocs the same
+        // territory should be reclaimed minus internal MCB overhead.)
+        assertTrue(freeAfterTerminate >= (largest & 0xFFFF) - 4,
+            "after termination, free block must be approximately the original largest block "
+                + "(largest=" + (largest & 0xFFFF) + " after=" + freeAfterTerminate + ")");
+    }
+
+    /**
+     * Regression for the reported bug: alternating Exec of two different children must
+     * not leak. Simulate it by running the Exec->shrink->extra-alloc->terminate cycle
+     * twice with different sizes and verify the second Exec succeeds.
+     */
+    @Test
+    void consecutiveExec_doesNotLeak() {
+        mgr.releaseUnusedMemoryAfterLoad(PSP_SEGMENT, (short) 0x0146, (short) 0x1FFE);
+        cpu.getReg().DS.setValue(PSP_SEGMENT);
+
+        for (int iter = 0; iter < 5; iter++) {
+            int childImage = 0x0200 + iter * 0x40; // varying sizes
+
+            mgr.allocateMemory(cpu, (short) 0xFFFF);
+            short largest = cpu.getReg().BX.getValue();
+            assertTrue((largest & 0xFFFF) > childImage,
+                "iter " + iter + ": probe must report enough free memory (got " + (largest & 0xFFFF) + ")");
+
+            mgr.allocateMemory(cpu, largest);
+            assertFalse(cpu.getReg().flags.isCarry(), "iter " + iter + ": Exec allocation must succeed");
+            short childPSP = cpu.getReg().AX.getValue();
+            cpu.getMemory().writeWord(new nz.co.electricbolt.xt.cpu.SegOfs((short)(childPSP - 1), (short) 0x0001), childPSP);
+
+            mgr.resizeMemory(cpu, childPSP, (short) childImage);
+            assertFalse(cpu.getReg().flags.isCarry());
+
+            // Child allocates working heap.
+            mgr.allocateMemory(cpu, (short) 0x0400);
+            assertFalse(cpu.getReg().flags.isCarry(), "iter " + iter + ": child heap allocation must succeed");
+            short heap = cpu.getReg().AX.getValue();
+            cpu.getMemory().writeWord(new nz.co.electricbolt.xt.cpu.SegOfs((short)(heap - 1), (short) 0x0001), childPSP);
+
+            // Child terminates.
+            mgr.freeBlocksOwnedBy(childPSP);
+        }
+    }
+
     @Test
     void freeInvalidSegment_setsCarry() {
         mgr.releaseUnusedMemoryAfterLoad(PSP_SEGMENT, (short) 0x0146, (short) 0x1FFE);
