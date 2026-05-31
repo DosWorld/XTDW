@@ -88,4 +88,9 @@ public class ConsoleIO {
             MemoryUtil.writeBuf(cpu.getMemory(), buffer, input);
         }
     }
+
+    @Interrupt(function = 0x63, description = "Double-Byte Character Set (DBCS) support in East Asian versions of DOS.")
+    public void DbcsApi(final CPU cpu, final @AL char subfn) {
+        // Do nothing
+    }
 }
