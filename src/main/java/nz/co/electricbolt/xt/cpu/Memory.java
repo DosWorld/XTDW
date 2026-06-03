@@ -15,6 +15,8 @@ public class Memory {
     final byte[] permissions = new byte[MEMORY_SIZE];
     final CPU cpu;
     private EMS ems;
+    boolean emsEnabled = false;
+    boolean permissionsEnabled = false;
 
     public Memory(final CPU cpu) {
         this.cpu = cpu;
@@ -23,6 +25,7 @@ public class Memory {
 
     public void setEMS(EMS ems) {
         this.ems = ems;
+        this.emsEnabled = (ems != null);
     }
 
     public String fromBitmask(final byte permissionBitmask) {
@@ -49,6 +52,7 @@ public class Memory {
         for (int i = linearAddress; i < linearAddress + size; i++) {
             permissions[i] &= (byte) ~permissionBitmask;
         }
+        permissionsEnabled = true;
     }
 
     /**
@@ -104,6 +108,11 @@ public class Memory {
      */
     public void setLinearByte(final int linearAddress, final byte value) {
         buf[linearAddress] = value;
+    }
+
+    /** Reads a 16-bit word directly from a linear address without any protection checks. */
+    public short getWordAtLinear(final int linearAddress) {
+        return (short) ((buf[(linearAddress + 1) & 0xFFFFF] & 0xFF) << 8 | buf[linearAddress & 0xFFFFF] & 0xFF);
     }
 
     /**
@@ -176,7 +185,7 @@ public class Memory {
      */
     public byte readByte(final SegOfs segOfs) {
         int address = segOfs.toLinearAddress();
-        if (ems != null && ems.isPageFrameSegment(segOfs.getSegment())) {
+        if (emsEnabled && ems.isPageFrameSegment(segOfs.getSegment())) {
             int emsValue = ems.readByte(address);
             if (emsValue != -1) {
                 return (byte) emsValue;
@@ -184,7 +193,7 @@ public class Memory {
         }
         byte value = buf[address];
         if (cpu != null) {
-            if ((permissions[address] & Memory.PERMISSION_READ) == 0) {
+            if (permissionsEnabled && (permissions[address] & Memory.PERMISSION_READ) == 0) {
                 cpu.delegate.invalidMemoryAccess(segOfs, Memory.PERMISSION_READ);
             }
             if (cpu.hasWatchpoints) cpu.checkMemoryReadWatchpoint(segOfs);
@@ -201,7 +210,7 @@ public class Memory {
     public byte fetchByte(final SegOfs segOfs) {
         int address = segOfs.toLinearAddress();
         byte value = buf[address];
-        if (cpu != null && (permissions[address] & Memory.PERMISSION_EXECUTE) == 0) {
+        if (permissionsEnabled && cpu != null && (permissions[address] & Memory.PERMISSION_EXECUTE) == 0) {
             cpu.delegate.invalidMemoryAccess(segOfs, Memory.PERMISSION_EXECUTE);
         }
         return value;
@@ -216,12 +225,12 @@ public class Memory {
 
     public void writeByte(final SegOfs segOfs, final byte value) {
         int address = segOfs.toLinearAddress();
-        if (ems != null && ems.isPageFrameSegment(segOfs.getSegment())) {
+        if (emsEnabled && ems.isPageFrameSegment(segOfs.getSegment())) {
             ems.writeByte(address, value & 0xFF);
             return;
         }
         if (cpu != null) {
-            if ((permissions[address] & Memory.PERMISSION_WRITE) == 0) {
+            if (permissionsEnabled && (permissions[address] & Memory.PERMISSION_WRITE) == 0) {
                 cpu.delegate.invalidMemoryAccess(segOfs, Memory.PERMISSION_WRITE);
             }
             if (cpu.hasWatchpoints) cpu.checkMemoryWriteWatchpoint(segOfs);
@@ -242,7 +251,7 @@ public class Memory {
         int ofsHi = (ofsLo + 1) & 0xFFFF;
         int addrLo = (segBase + ofsLo) & 0xFFFFF;
         int addrHi = (segBase + ofsHi) & 0xFFFFF;
-        if (ems != null && ems.isPageFrameSegment(segOfs.getSegment())) {
+        if (emsEnabled && ems.isPageFrameSegment(segOfs.getSegment())) {
             int loVal = ems.readByte(addrLo);
             int hiVal = ems.readByte(addrHi);
             if (loVal != -1 && hiVal != -1) {
@@ -252,10 +261,12 @@ public class Memory {
         byte lo = buf[addrLo];
         byte hi = buf[addrHi];
         if (cpu != null) {
-            if ((permissions[addrLo] & Memory.PERMISSION_READ) == 0)
-                cpu.delegate.invalidMemoryAccess(new SegOfs(segOfs.getSegment(), (short) ofsLo), Memory.PERMISSION_READ);
-            if ((permissions[addrHi] & Memory.PERMISSION_READ) == 0)
-                cpu.delegate.invalidMemoryAccess(new SegOfs(segOfs.getSegment(), (short) ofsHi), Memory.PERMISSION_READ);
+            if (permissionsEnabled) {
+                if ((permissions[addrLo] & Memory.PERMISSION_READ) == 0)
+                    cpu.delegate.invalidMemoryAccess(new SegOfs(segOfs.getSegment(), (short) ofsLo), Memory.PERMISSION_READ);
+                if ((permissions[addrHi] & Memory.PERMISSION_READ) == 0)
+                    cpu.delegate.invalidMemoryAccess(new SegOfs(segOfs.getSegment(), (short) ofsHi), Memory.PERMISSION_READ);
+            }
             if (cpu.hasWatchpoints) {
                 cpu.checkMemoryReadWatchpoint(new SegOfs(segOfs.getSegment(), (short) ofsLo));
                 cpu.checkMemoryReadWatchpoint(new SegOfs(segOfs.getSegment(), (short) ofsHi));
@@ -277,7 +288,7 @@ public class Memory {
         int addrHi = (segBase + ((segOfs.getOffset() + 1) & 0xFFFF)) & 0xFFFFF;
         byte lo = buf[addrLo];
         byte hi = buf[addrHi];
-        if (cpu != null) {
+        if (permissionsEnabled && cpu != null) {
             if ((permissions[addrLo] & Memory.PERMISSION_EXECUTE) == 0)
                 cpu.delegate.invalidMemoryAccess(segOfs, Memory.PERMISSION_EXECUTE);
             if ((permissions[addrHi] & Memory.PERMISSION_EXECUTE) == 0)
@@ -299,16 +310,18 @@ public class Memory {
         int ofsHi = (ofsLo + 1) & 0xFFFF;
         int addrLo = (segBase + ofsLo) & 0xFFFFF;
         int addrHi = (segBase + ofsHi) & 0xFFFFF;
-        if (ems != null && ems.isPageFrameSegment(segOfs.getSegment())) {
+        if (emsEnabled && ems.isPageFrameSegment(segOfs.getSegment())) {
             ems.writeByte(addrLo, (byte) value & 0xFF);
             ems.writeByte(addrHi, (byte) (value >> 8) & 0xFF);
             return;
         }
         if (cpu != null) {
-            if ((permissions[addrLo] & Memory.PERMISSION_WRITE) == 0)
-                cpu.delegate.invalidMemoryAccess(new SegOfs(segOfs.getSegment(), (short) ofsLo), Memory.PERMISSION_WRITE);
-            if ((permissions[addrHi] & Memory.PERMISSION_WRITE) == 0)
-                cpu.delegate.invalidMemoryAccess(new SegOfs(segOfs.getSegment(), (short) ofsHi), Memory.PERMISSION_WRITE);
+            if (permissionsEnabled) {
+                if ((permissions[addrLo] & Memory.PERMISSION_WRITE) == 0)
+                    cpu.delegate.invalidMemoryAccess(new SegOfs(segOfs.getSegment(), (short) ofsLo), Memory.PERMISSION_WRITE);
+                if ((permissions[addrHi] & Memory.PERMISSION_WRITE) == 0)
+                    cpu.delegate.invalidMemoryAccess(new SegOfs(segOfs.getSegment(), (short) ofsHi), Memory.PERMISSION_WRITE);
+            }
             if (cpu.hasWatchpoints) {
                 cpu.checkMemoryWriteWatchpoint(new SegOfs(segOfs.getSegment(), (short) ofsLo));
                 cpu.checkMemoryWriteWatchpoint(new SegOfs(segOfs.getSegment(), (short) ofsHi));

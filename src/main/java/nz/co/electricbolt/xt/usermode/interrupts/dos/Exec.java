@@ -16,7 +16,7 @@ public class Exec {
     @Interrupt(interrupt = 0x21, function = 0x4B, subfunction = 0x00, description = "EXEC: Load and execute program")
     public void exec(CPU cpu, Trace trace, DirectoryTranslation dirTrans,
                      @ASCIZ @DS @DX String filename, @ES @BX SegOfs parameterBlock) {
-        filename = dirTrans.emulatedPathToHostPath(filename);
+        filename = dirTrans.emulatedPathToHostPath(filename.toUpperCase());
         File file = new File(filename);
         if (!file.exists() || !file.isFile()) {
             cpu.getReg().flags.setCarry(true);
@@ -29,7 +29,7 @@ public class Exec {
             cpu.getMemory().readWord(new SegOfs(parameterBlock.getSegment(), (short)(parameterBlock.getOffset() + 4))),
             cpu.getMemory().readWord(new SegOfs(parameterBlock.getSegment(), (short)(parameterBlock.getOffset() + 2)))
         );
-        byte cmdLen = cpu.getMemory().readByte(cmdLinePtr);
+        int cmdLen = cpu.getMemory().readByte(cmdLinePtr) & 0xFF;
         byte[] cmdBuf = new byte[cmdLen];
         for (int i = 0; i < cmdLen; i++) {
             cmdBuf[i] = cpu.getMemory().readByte(new SegOfs(cmdLinePtr.getSegment(), (short)(cmdLinePtr.getOffset() + 1 + i)));
@@ -73,6 +73,8 @@ public class Exec {
         allocateMemory(cpu, allocatedParagraphs[0], allocatedSegment);
         if (cpu.getReg().flags.isCarry()) {
             TerminateProgram.popContext(cpu);
+            cpu.getReg().flags.setCarry(true);
+            cpu.getReg().AX.setValue((short) 0x0008); // insufficient memory
             return;
         }
 
@@ -93,10 +95,12 @@ public class Exec {
         cpu.getMemory().writeWord(new SegOfs(childPSP, (short) 0x0008), (short) 0xFFFF);
 
         SegOfs cmdLine = new SegOfs(childPSP, (short) 0x0080);
-        cpu.getMemory().writeByte(cmdLine, (byte) commandLine.length());
-        for (int i = 0; i < commandLine.length(); i++) {
+        int cmdOutLen = Math.min(commandLine.length(), 126); // PSP:0080 can hold at most 126 chars + len + CR
+        cpu.getMemory().writeByte(cmdLine, (byte) cmdOutLen);
+        for (int i = 0; i < cmdOutLen; i++) {
             cpu.getMemory().writeByte(new SegOfs(cmdLine.getSegment(), (short)(cmdLine.getOffset() + 1 + i)), (byte) commandLine.charAt(i));
         }
+        cpu.getMemory().writeByte(new SegOfs(cmdLine.getSegment(), (short)(cmdLine.getOffset() + 1 + cmdOutLen)), (byte) '\r');
 
         // Switch currentPSP before loading so allocator activity during load
         // attributes ownership to the child, and so an abort during load can
@@ -105,7 +109,14 @@ public class Exec {
         TerminateProgram.setCurrentPSP(childPSP);
 
         ProgramLoader loader = new ProgramLoader(cpu);
-        loader.load(filename, childPSP);
+        try {
+            loader.load(filename, childPSP);
+        } catch (RuntimeException e) {
+            TerminateProgram.popContext(cpu);
+            cpu.getReg().flags.setCarry(true);
+            cpu.getReg().AX.setValue((short) 0x000B); // invalid format
+            return;
+        }
 
         // Shrink the child's block to (image + stack) and release the tail as a
         // free block, mirroring what ProgramRunner does for the top-level program.

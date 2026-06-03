@@ -74,8 +74,7 @@ public class ProgramLoader {
                 cpu.syncSegmentBases();
             }
         } catch (IOException e) {
-            System.out.println("The program " + path + " could not be read.");
-            System.exit(255);
+            throw new RuntimeException("The program " + path + " could not be read.", e);
         }
     }
 }

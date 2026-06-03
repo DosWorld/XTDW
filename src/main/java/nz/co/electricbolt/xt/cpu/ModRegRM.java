@@ -61,6 +61,13 @@ public class ModRegRM {
 
     private final CPU cpu;
 
+    // Pre-allocated scratch objects reused on every decode — no heap allocation per instruction.
+    private final SegOfs scratchSegOfs = new SegOfs((short) 0, (short) 0);
+    private final SegOfs scratchSegOfs2 = new SegOfs((short) 0, (short) 0);
+    private final RegRM8 scratchRegRM8 = new RegRM8(null, (SegOfs) null, null, 0);
+    private final RegRM16 scratchRegRM16 = new RegRM16(null, (SegOfs) null, null, 0);
+    private final RegRM16 scratchRegRM16b = new RegRM16(null, (SegOfs) null, null, 0);
+
     public ModRegRM(final CPU cpu) {
         this.cpu = cpu;
     }
@@ -69,7 +76,9 @@ public class ModRegRM {
         final short offset = cpu.fetch16();
         final Reg16 segment = cpu.getSegmentOverride() == null ? cpu.reg.DS : cpu.getSegmentOverride();
         cpu.setSegmentOverride(null);
-        return new SegOfs(segment, offset);
+        scratchSegOfs2.setSegment((short) segment.getUnsigned());
+        scratchSegOfs2.setOffset(offset);
+        return scratchSegOfs2;
     }
 
     public RegRM8 fetch8() {
@@ -78,30 +87,37 @@ public class ModRegRM {
         final int regValue = (value >> 3) & 0x07;
         final int rmValue = value & 0x07;
         if (modValue == 3) {
-            return new RegRM8(getReg8(regValue), getReg8(rmValue), regValue);
+            scratchRegRM8.set(getReg8(regValue), getReg8(rmValue), regValue);
         } else {
-            return new RegRM8(getReg8(regValue), effectiveAddress(modValue, rmValue), cpu.memory, regValue);
+            scratchRegRM8.set(getReg8(regValue), effectiveAddress(modValue, rmValue), cpu.memory, regValue);
         }
+        return scratchRegRM8;
     }
 
     public RegRM16 fetch16() {
-        return fetch16(false);
+        return fetch16impl(false, scratchRegRM16);
     }
 
     public RegRM16 fetch16SReg() {
-        return fetch16(true);
+        return fetch16impl(true, scratchRegRM16);
     }
 
-    private RegRM16 fetch16(boolean SReg) {
+    // Used by loadSeg (LDS/LES) which calls fetch16() then fetchSegOfs() — needs a separate scratch.
+    public RegRM16 fetch16b() {
+        return fetch16impl(false, scratchRegRM16b);
+    }
+
+    private RegRM16 fetch16impl(boolean SReg, RegRM16 scratch) {
         final int value = cpu.fetch8() & 0xFF;
         final int modValue = value >> 6;
         final int regValue = (value >> 3) & 0x07;
         final int rmValue = value & 0x07;
         if (modValue == 3) {
-            return new RegRM16(SReg ? getSegReg(regValue) : getReg16(regValue), getReg16(rmValue), regValue);
+            scratch.set(SReg ? getSegReg(regValue) : getReg16(regValue), getReg16(rmValue), regValue);
         } else {
-            return new RegRM16(SReg ? getSegReg(regValue) : getReg16(regValue), effectiveAddress(modValue, rmValue), cpu.memory, regValue);
+            scratch.set(SReg ? getSegReg(regValue) : getReg16(regValue), effectiveAddress(modValue, rmValue), cpu.memory, regValue);
         }
+        return scratch;
     }
 
     private SegOfs effectiveAddress(final int mod, final int rm) {
@@ -122,14 +138,14 @@ public class ModRegRM {
             }
 
             displacement += switch (rm) {
-                case 0 -> (cpu.reg.BX.getValue() & 0xFFFF) + ((int) cpu.reg.SI.getValue() & 0xFFFF);
-                case 1 -> (cpu.reg.BX.getValue() & 0xFFFF) + ((int) cpu.reg.DI.getValue() & 0xFFFF);
-                case 2 -> (cpu.reg.BP.getValue() & 0xFFFF) + ((int) cpu.reg.SI.getValue() & 0xFFFF);
-                case 3 -> (cpu.reg.BP.getValue() & 0xFFFF) + ((int) cpu.reg.DI.getValue() & 0xFFFF);
-                case 4 -> (int) (cpu.reg.SI.getValue() & 0xFFFF);
-                case 5 -> (int) (cpu.reg.DI.getValue() & 0xFFFF);
-                case 6 -> (int) (cpu.reg.BP.getValue() & 0xFFFF);
-                default -> (int) (cpu.reg.BX.getValue() & 0xFFFF);
+                case 0 -> cpu.reg.BX.getUnsigned() + cpu.reg.SI.getUnsigned();
+                case 1 -> cpu.reg.BX.getUnsigned() + cpu.reg.DI.getUnsigned();
+                case 2 -> cpu.reg.BP.getUnsigned() + cpu.reg.SI.getUnsigned();
+                case 3 -> cpu.reg.BP.getUnsigned() + cpu.reg.DI.getUnsigned();
+                case 4 -> cpu.reg.SI.getUnsigned();
+                case 5 -> cpu.reg.DI.getUnsigned();
+                case 6 -> cpu.reg.BP.getUnsigned();
+                default -> cpu.reg.BX.getUnsigned();
             };
             if (segment == null) {
                 if (rm == 2 || rm == 3 || rm == 6) {
@@ -139,7 +155,9 @@ public class ModRegRM {
                 }
             }
         }
-        return new SegOfs(segment, (short) (displacement & 0xFFFF));
+        scratchSegOfs.setSegment(segment.getValue());
+        scratchSegOfs.setOffset((short) (displacement & 0xFFFF));
+        return scratchSegOfs;
     }
 
     public Reg8 getReg8(final int reg) {

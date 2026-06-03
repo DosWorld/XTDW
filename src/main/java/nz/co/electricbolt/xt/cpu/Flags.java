@@ -22,6 +22,18 @@ public class Flags {
     private static final short ALWAYS_ZERO_MASK16 = RESERVED3 | RESERVED2;
     private static final short FLAG_MASK16 = OVERFLOW | DIRECTION | INTERRUPT_ENABLE | TRAP | SIGN | ZERO | AUX_CARRY | PARITY | CARRY;
 
+    // Bits cleared by arithmetic flag helpers (all flags except TRAP/INTERRUPT/DIRECTION/OVERFLOW preserved separately)
+    private static final int ARITH_MASK = OVERFLOW | SIGN | ZERO | AUX_CARRY | PARITY | CARRY;
+
+    static final boolean[] PARITY_TABLE = new boolean[256];
+    static {
+        for (int i = 0; i < 256; i++) {
+            int p = i ^ (i >> 4);
+            p &= 0xF;
+            PARITY_TABLE[i] = ((0x6996 >> p) & 1) == 0;
+        }
+    }
+
     private short value;
 
     public Flags() {
@@ -215,5 +227,66 @@ public class Flags {
 
     public boolean isNotOverflow() {
         return (value & OVERFLOW) == 0;
+    }
+
+    // Batch-write all arithmetic flags (CF/PF/AF/ZF/SF/OF) in one store.
+    public void setArithFlags8(final int result, final int a, final int b, final int carryIn) {
+        int f = value & ~ARITH_MASK;
+        if (result > 0xFF)                                    f |= CARRY;
+        if ((result & 0x80) != 0)                             f |= SIGN;
+        if ((result & 0xFF) == 0)                             f |= ZERO;
+        if (((a ^ b ^ result) & 0x10) != 0)                  f |= AUX_CARRY;
+        if (PARITY_TABLE[result & 0xFF])                      f |= PARITY;
+        if (((a ^ result) & (~(a ^ b)) & 0x80) != 0)         f |= OVERFLOW;
+        value = (short) f;
+    }
+
+    public void setArithFlags8Sub(final int result, final int a, final int b, final int carryIn) {
+        int f = value & ~ARITH_MASK;
+        if ((result & 0xFFF) > 0xFF)                          f |= CARRY;
+        if ((result & 0x80) != 0)                             f |= SIGN;
+        if ((result & 0xFF) == 0)                             f |= ZERO;
+        if (((a ^ b ^ result) & 0x10) != 0)                  f |= AUX_CARRY;
+        if (PARITY_TABLE[result & 0xFF])                      f |= PARITY;
+        if (((a ^ b) & (a ^ result) & 0x80) != 0)            f |= OVERFLOW;
+        value = (short) f;
+    }
+
+    public void setArithFlags16(final int result, final int a, final int b, final int carryIn) {
+        int f = value & ~ARITH_MASK;
+        if ((result & 0xFFFFF) > 0xFFFF)                      f |= CARRY;
+        if ((result & 0x8000) != 0)                           f |= SIGN;
+        if ((result & 0xFFFF) == 0)                           f |= ZERO;
+        if (((a ^ b ^ result) & 0x10) != 0)                  f |= AUX_CARRY;
+        if (PARITY_TABLE[result & 0xFF])                      f |= PARITY;
+        if (((a ^ result) & (~(a ^ b)) & 0x8000) != 0)       f |= OVERFLOW;
+        value = (short) f;
+    }
+
+    public void setArithFlags16Sub(final int result, final int a, final int b, final int carryIn) {
+        int f = value & ~ARITH_MASK;
+        if ((result & 0xFFFFF) > 0xFFFF)                      f |= CARRY;
+        if ((result & 0x8000) != 0)                           f |= SIGN;
+        if ((result & 0xFFFF) == 0)                           f |= ZERO;
+        if (((a ^ b ^ result) & 0x10) != 0)                  f |= AUX_CARRY;
+        if (PARITY_TABLE[result & 0xFF])                      f |= PARITY;
+        if (((a ^ b) & (a ^ result) & 0x8000) != 0)          f |= OVERFLOW;
+        value = (short) f;
+    }
+
+    public void setLogicFlags8(final int result) {
+        int f = value & ~ARITH_MASK;
+        if ((result & 0x80) != 0)    f |= SIGN;
+        if ((result & 0xFF) == 0)    f |= ZERO;
+        if (PARITY_TABLE[result & 0xFF]) f |= PARITY;
+        value = (short) f;
+    }
+
+    public void setLogicFlags16(final int result) {
+        int f = value & ~ARITH_MASK;
+        if ((result & 0x8000) != 0)  f |= SIGN;
+        if ((result & 0xFFFF) == 0)  f |= ZERO;
+        if (PARITY_TABLE[result & 0xFF]) f |= PARITY;
+        value = (short) f;
     }
 }

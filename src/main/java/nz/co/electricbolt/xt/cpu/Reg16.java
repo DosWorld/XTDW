@@ -24,6 +24,11 @@ public class Reg16 {
         return value;
     }
 
+    /** Returns the register value as an unsigned int (0–65535). Avoids & 0xFFFF at call sites. */
+    public int getUnsigned() {
+        return value & 0xFFFF;
+    }
+
     public void setValue(final short value) {
         this.value = value;
     }

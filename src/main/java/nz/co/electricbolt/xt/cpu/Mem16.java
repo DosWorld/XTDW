@@ -2,9 +2,9 @@ package nz.co.electricbolt.xt.cpu;
 
 public class Mem16 {
 
-    private final SegOfs segOfs;
-    private final Reg16 reg;
-    private final Memory memory;
+    private SegOfs segOfs;
+    private Reg16 reg;
+    private Memory memory;
 
     Mem16(final SegOfs segOfs, final Memory memory) {
         this.segOfs = segOfs;
@@ -18,12 +18,20 @@ public class Mem16 {
         this.reg = reg;
     }
 
+    void setMem(final SegOfs segOfs, final Memory memory) {
+        this.segOfs = segOfs;
+        this.memory = memory;
+        this.reg = null;
+    }
+
+    void setReg(final Reg16 reg) {
+        this.reg = reg;
+        this.segOfs = null;
+        this.memory = null;
+    }
+
     public SegOfs getSegOfs() {
-        if (segOfs != null) {
-            return segOfs.copy();
-        } else {
-            return null;
-        }
+        return segOfs;
     }
 
     public Reg16 getReg() {

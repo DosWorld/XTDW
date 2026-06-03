@@ -14,52 +14,34 @@ public class ALU {
     }
 
     public byte add8(final byte a, final byte b, final boolean carry) {
-        final int result = (a & 0xFF) + (b & 0xFF) + (carry ? 1 : 0);
-        // The overflow flag is set when the most significant bit is changed by adding two numbers with the same sign.
-        flags.setOverflow(((a & 0x80) == (b & 0x80)) && (result & 0x80) != (a & 0x80));
-        flags.setSignNegative((result & 0x80) == 0x80);
-        flags.setZero((result & 0xFF) == 0);
-        flags.setAuxiliaryCarry((a & 0xF) + (b & 0xF) + (carry ? 1 : 0) > 0xF);
-        flags.setParityEven(Parity8.isEven(result));
-        flags.setCarry(result > 0xFF);
+        final int ci = carry ? 1 : 0;
+        final int ai = a & 0xFF, bi = b & 0xFF;
+        final int result = ai + bi + ci;
+        flags.setArithFlags8(result, ai, bi, ci);
         return (byte) result;
     }
 
     public short add16(final short a, final short b, final boolean carry) {
-        final int result = (a & 0xFFFF) + (b & 0xFFFF) + (carry ? 1 : 0);
-        // The overflow flag is set when the most significant bit is changed by adding two numbers with the same sign.
-        flags.setOverflow(((a & 0x8000) == (b & 0x8000)) && (result & 0x8000) != (a & 0x8000));
-        flags.setSignNegative((result & 0x8000) == 0x8000);
-        flags.setZero((result & 0xFFFF) == 0);
-        flags.setAuxiliaryCarry((a & 0xF) + (b & 0xF) + (carry ? 1 : 0) > 0xF);
-        flags.setParityEven(Parity8.isEven(result & 0xFF));
-        flags.setCarry((result & 0xFFFFF) > 0xFFFF);
+        final int ci = carry ? 1 : 0;
+        final int ai = a & 0xFFFF, bi = b & 0xFFFF;
+        final int result = ai + bi + ci;
+        flags.setArithFlags16(result, ai, bi, ci);
         return (short) result;
     }
 
     public byte sub8(final byte a, final byte b, final boolean carry) {
-        final int result = (a & 0xFF) - (b & 0xFF) - (carry ? 1 : 0);
-        // The overflow flag is set when the most significant bit is changed by subtracting two numbers with different
-        // signs.
-        flags.setOverflow(((a & 0x80) != (b & 0x80)) && (result & 0x80) != (a & 0x80));
-        flags.setSignNegative((result & 0x80) == 0x80);
-        flags.setZero((result & 0xFF) == 0);
-        flags.setAuxiliaryCarry((a & 0xF) - (b & 0xF) - (carry ? 1 : 0) < 0);
-        flags.setParityEven(Parity8.isEven(result));
-        flags.setCarry((result & 0xFFF) > 0xFF);
+        final int ci = carry ? 1 : 0;
+        final int ai = a & 0xFF, bi = b & 0xFF;
+        final int result = ai - bi - ci;
+        flags.setArithFlags8Sub(result, ai, bi, ci);
         return (byte) result;
     }
 
     public short sub16(final short a, final short b, final boolean carry) {
-        final int result = (a & 0xFFFF) - (b & 0xFFFF) - (carry ? 1 : 0);
-        // The overflow flag is set when the most significant bit is changed by subtracting two numbers with different
-        // signs.
-        flags.setOverflow(((a & 0x8000) != (b & 0x8000)) && (result & 0x8000) != (a & 0x8000));
-        flags.setSignNegative((result & 0x8000) == 0x8000);
-        flags.setZero((result & 0xFFFF) == 0);
-        flags.setAuxiliaryCarry((a & 0xF) - (b & 0xF) - (carry ? 1 : 0) < 0);
-        flags.setParityEven(Parity8.isEven(result));
-        flags.setCarry((result & 0xFFFFF) > 0xFFFF);
+        final int ci = carry ? 1 : 0;
+        final int ai = a & 0xFFFF, bi = b & 0xFFFF;
+        final int result = ai - bi - ci;
+        flags.setArithFlags16Sub(result, ai, bi, ci);
         return (short) result;
     }
 
@@ -68,12 +50,13 @@ public class ALU {
      */
     public short mul8(final byte a, final byte b) {
         final int result = (a & 0xFF) * (b & 0xFF);
-        flags.setOverflow(result >>> 8 != 0);
-        flags.setCarry(result >>> 8 != 0);
+        final boolean hi = (result >>> 8) != 0;
+        flags.setOverflow(hi);
+        flags.setCarry(hi);
         flags.setSignNegative((result & 0x8000) == 0x8000);
-        flags.setZero(result >>> 8 == 0);
+        flags.setZero(!hi);
         flags.setAuxiliaryCarry(false);
-        flags.setParityEven(Parity8.isEven(result >>> 8));
+        flags.setParityEven(Flags.PARITY_TABLE[(result >>> 8) & 0xFF]);
         return (short) (result & 0xFFFF);
     }
 
@@ -194,12 +177,13 @@ public class ALU {
      */
     public int mul16(final short a, final short b) {
         final long result = (long) (a & 0xFFFF) * (b & 0xFFFF);
-        flags.setOverflow(result >>> 16 != 0);
-        flags.setCarry(result >>> 16 != 0);
+        final boolean hi = (result >>> 16) != 0;
+        flags.setOverflow(hi);
+        flags.setCarry(hi);
         flags.setSignNegative((result & 0x80000000L) == 0x80000000L);
-        flags.setZero(result >>> 16 == 0);
+        flags.setZero(!hi);
         flags.setAuxiliaryCarry(false);
-        flags.setParityEven(Parity8.isEven((int) (result >>> 16)));
+        flags.setParityEven(Flags.PARITY_TABLE[(int) (result >>> 16) & 0xFF]);
         return (int) (result & 0xFFFFFFFFL);
     }
 
@@ -220,67 +204,37 @@ public class ALU {
 
     public byte or8(final short a, final short b) {
         final int result = (a & 0xFF) | (b & 0xFF);
-        flags.setOverflow(false);
-        flags.setSignNegative((result & 0x80) == 0x80);
-        flags.setZero((result & 0xFF) == 0);
-        flags.setAuxiliaryCarry(false);
-        flags.setParityEven(Parity8.isEven(result));
-        flags.setCarry(false);
+        flags.setLogicFlags8(result);
         return (byte) result;
     }
 
     public short or16(final short a, final short b) {
         final int result = (a & 0xFFFF) | (b & 0xFFFF);
-        flags.setOverflow(false);
-        flags.setSignNegative((result & 0x8000) == 0x8000);
-        flags.setZero((result & 0xFFFF) == 0);
-        flags.setAuxiliaryCarry(false);
-        flags.setParityEven(Parity8.isEven(result));
-        flags.setCarry(false);
+        flags.setLogicFlags16(result);
         return (short) result;
     }
 
     public byte and8(final short a, final short b) {
         final int result = (a & 0xFF) & (b & 0xFF);
-        flags.setOverflow(false);
-        flags.setSignNegative((result & 0x80) == 0x80);
-        flags.setZero((result & 0xFF) == 0);
-        flags.setAuxiliaryCarry(false);
-        flags.setParityEven(Parity8.isEven(result));
-        flags.setCarry(false);
+        flags.setLogicFlags8(result);
         return (byte) result;
     }
 
     public short and16(final short a, final short b) {
         final int result = (a & 0xFFFF) & (b & 0xFFFF);
-        flags.setOverflow(false);
-        flags.setSignNegative((result & 0x8000) == 0x8000);
-        flags.setZero((result & 0xFFFF) == 0);
-        flags.setAuxiliaryCarry(false);
-        flags.setParityEven(Parity8.isEven(result));
-        flags.setCarry(false);
+        flags.setLogicFlags16(result);
         return (short) result;
     }
 
     public byte xor8(final short a, final short b) {
         final int result = (a & 0xFF) ^ (b & 0xFF);
-        flags.setOverflow(false);
-        flags.setSignNegative((result & 0x80) == 0x80);
-        flags.setZero((result & 0xFF) == 0);
-        flags.setAuxiliaryCarry(false);
-        flags.setParityEven(Parity8.isEven(result));
-        flags.setCarry(false);
+        flags.setLogicFlags8(result);
         return (byte) result;
     }
 
     public short xor16(final short a, final short b) {
         final int result = (a & 0xFFFF) ^ (b & 0xFFFF);
-        flags.setOverflow(false);
-        flags.setSignNegative((result & 0x8000) == 0x8000);
-        flags.setZero((result & 0xFFFF) == 0);
-        flags.setAuxiliaryCarry(false);
-        flags.setParityEven(Parity8.isEven(result));
-        flags.setCarry(false);
+        flags.setLogicFlags16(result);
         return (short) result;
     }
 }

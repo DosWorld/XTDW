@@ -47,6 +47,7 @@ public class ProgramRunner implements CPUDelegate {
         this.cpu = new CPU(this);
         this.interrupts = new Interrupts();
         this.trace = new Trace(cpu, traceCPU, traceInterrupt, traceFile);
+        this.cpu.fetchTracingEnabled = traceCPU || traceInterrupt;
         this.cpu.setTraceMode(traceMode);
     }
 
@@ -95,7 +96,12 @@ public class ProgramRunner implements CPUDelegate {
         cpu.getReg().ES.setValue((short) 0x0090);
 
         final ProgramLoader programLoader = new ProgramLoader(cpu);
-        programLoader.load(programPath);
+        try {
+            programLoader.load(programPath);
+        } catch (RuntimeException e) {
+            System.out.println(e.getMessage());
+            System.exit(255);
+        }
         nz.co.electricbolt.xt.usermode.interrupts.dos.Memory.releaseUnusedMemoryAfterLoad(
             (short) 0x0090, cpu.getReg().SS.getValue(), cpu.getReg().SP.getValue());
 

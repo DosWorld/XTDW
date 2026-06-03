@@ -2,9 +2,9 @@ package nz.co.electricbolt.xt.cpu;
 
 public class RegRM16 {
 
-    private final Reg16 reg;
+    private Reg16 reg;
     private final Mem16 mem;
-    private final int regValue;
+    private int regValue;
 
     public RegRM16(final Reg16 reg, final Reg16 RMReg, final int regValue) {
         this.reg = reg;
@@ -15,6 +15,18 @@ public class RegRM16 {
     public RegRM16(final Reg16 reg, final SegOfs RMMem, Memory memory, final int regValue) {
         this.reg = reg;
         this.mem = new Mem16(RMMem, memory);
+        this.regValue = regValue;
+    }
+
+    void set(final Reg16 reg, final Reg16 RMReg, final int regValue) {
+        this.reg = reg;
+        this.mem.setReg(RMReg);
+        this.regValue = regValue;
+    }
+
+    void set(final Reg16 reg, final SegOfs RMMem, final Memory memory, final int regValue) {
+        this.reg = reg;
+        this.mem.setMem(RMMem, memory);
         this.regValue = regValue;
     }
 

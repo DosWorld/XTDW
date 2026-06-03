@@ -33,6 +33,7 @@ public class CPU {
     private boolean hasBreakpoints = false;
     private boolean breakpointReached = false;
     private boolean traceMode = false;
+    public boolean fetchTracingEnabled = false;
     private List<Watchpoint> watchpoints = new ArrayList<>();
     boolean hasWatchpoints = false;
     private boolean watchpointReached = false;
@@ -864,8 +865,9 @@ public class CPU {
                 group2.rotate16(reg.CL.getValue());
                 break;
             case (byte) 0xD7: {
-                final SegOfs segOfs = new SegOfs(segmentOverride == null ? reg.DS : segmentOverride, (short) (reg.BX.getValue() + (reg.AL.getValue() & 0xFF)));
-                reg.AL.setValue(memory.readByte(segOfs));
+                final Reg16 xlatSeg = segmentOverride == null ? reg.DS : segmentOverride;
+                final int xlatLinear = ((xlatSeg.getValue() & 0xFFFF) << 4) + ((reg.BX.getValue() + (reg.AL.getValue() & 0xFF)) & 0xFFFF);
+                reg.AL.setValue(memory.buf[xlatLinear & 0xFFFFF]);
                 segmentOverride = null;
                 break;
             }
@@ -967,19 +969,19 @@ public class CPU {
     }
 
     byte fetch8() {
-        int addr = (csBase + (reg.IP.getValue() & 0xFFFF)) & 0xFFFFF;
-        final byte result = memory.buf[addr];
-        delegate.fetched8(result, instructionCount);
+        int ip = reg.IP.getUnsigned();
+        final byte result = memory.buf[(csBase + ip) & 0xFFFFF];
+        if (fetchTracingEnabled) delegate.fetched8(result, instructionCount);
         reg.IP.add((short) 1);
         return result;
     }
 
     short fetch16() {
-        int ip = reg.IP.getValue() & 0xFFFF;
+        int ip = reg.IP.getUnsigned();
         int addrLo = (csBase + ip) & 0xFFFFF;
         int addrHi = (csBase + ((ip + 1) & 0xFFFF)) & 0xFFFFF;
         final short result = (short) ((memory.buf[addrHi] & 0xFF) << 8 | memory.buf[addrLo] & 0xFF);
-        delegate.fetched16(result, instructionCount);
+        if (fetchTracingEnabled) delegate.fetched16(result, instructionCount);
         reg.IP.add((short) 2);
         return result;
     }
@@ -1010,8 +1012,8 @@ public class CPU {
         reg.flags.setTrapEnabled(false);
         reg.flags.setInterruptEnabled(false);
         int ivtBase = 4 * (interrupt & 0xFF);
-        setCS(memory.getWord(new SegOfs((short) 0, (short) (ivtBase + 2))));
-        reg.IP.setValue(memory.getWord(new SegOfs((short) 0, (short) ivtBase)));
+        setCS(memory.getWordAtLinear(ivtBase + 2));
+        reg.IP.setValue(memory.getWordAtLinear(ivtBase));
     }
 
     void loadSeg(Reg16 segReg) {
@@ -1024,7 +1026,7 @@ public class CPU {
 
     public void push16(short value) {
         reg.SP.add((short) -2);
-        int sp = reg.SP.getValue() & 0xFFFF;
+        int sp = reg.SP.getUnsigned();
         int addrLo = (ssBase + sp) & 0xFFFFF;
         int addrHi = (ssBase + ((sp + 1) & 0xFFFF)) & 0xFFFFF;
         memory.buf[addrLo] = (byte) value;
@@ -1032,7 +1034,7 @@ public class CPU {
     }
 
     public short pop16() {
-        int sp = reg.SP.getValue() & 0xFFFF;
+        int sp = reg.SP.getUnsigned();
         int addrLo = (ssBase + sp) & 0xFFFFF;
         int addrHi = (ssBase + ((sp + 1) & 0xFFFF)) & 0xFFFFF;
         final short result = (short) ((memory.buf[addrHi] & 0xFF) << 8 | memory.buf[addrLo] & 0xFF);
