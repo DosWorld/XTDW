@@ -23,6 +23,8 @@ public class DiskFile extends BaseFile {
     public boolean open() {
         try {
             file = new File(filename);
+            if (!file.exists())
+                return false;
             final String mode = switch (accessMode) {
                 case readOnly -> "r";
                 case writeOnly -> "rw";
