@@ -7,6 +7,7 @@ import nz.co.electricbolt.xt.usermode.DiskTransferArea;
 import nz.co.electricbolt.xt.usermode.ErrorCode;
 import nz.co.electricbolt.xt.usermode.SharingMode;
 import nz.co.electricbolt.xt.usermode.filedevice.NULFile;
+import nz.co.electricbolt.xt.usermode.filedevice.EMMFile;
 import nz.co.electricbolt.xt.usermode.filedevice.BaseFile;
 import nz.co.electricbolt.xt.usermode.filedevice.CONFile;
 import nz.co.electricbolt.xt.usermode.filedevice.DiskFile;
@@ -110,9 +111,16 @@ public class FileIO {
 
             cpu.getReg().flags.setCarry(false);
             cpu.getReg().AX.setValue(baseFile.getFileHandle());
-        } else if (filename.equals("EMMXXXX0")) {
-            trace.interrupt("EMM memory not implemented");
-            setErrorResult(cpu, trace, ErrorCode.FileNotFound);
+        } else if (filename.toUpperCase().equals("EMMXXXX0")) {
+            trace.interrupt("Returning filehandle " + fileHandleCount);
+
+            baseFile = new EMMFile(accessMode, sharingMode, inheritenceFlag);
+            baseFile.setFileHandle(fileHandleCount);
+            fileHandleMap.put(fileHandleCount, baseFile);
+            fileHandleCount++;
+
+            cpu.getReg().flags.setCarry(false);
+            cpu.getReg().AX.setValue(baseFile.getFileHandle());
         } else {
             filename = directoryTranslation.emulatedPathToHostPath(filename.toUpperCase());
             trace.interrupt("Host filename " + filename);

@@ -81,6 +81,7 @@ public class Interrupts {
         loadClass("dos.MemoryManagement");
         loadClass("dos.ClipboardDOS");
         loadClass("dos.Exec");
+        loadClass("dos.EMSManagement");
     }
 
     /**

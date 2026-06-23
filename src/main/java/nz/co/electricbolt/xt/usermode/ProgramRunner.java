@@ -60,6 +60,30 @@ public class ProgramRunner implements CPUDelegate {
             cpu.getMemory().setLinearByte(linear, (byte) 0xCF);
         }
 
+        // Fake EMS device driver header, read by programs that detect the EMM
+        // driver via INT 21h AH=35h (get vector for INT 67h) followed by reading
+        // the 8-byte device name at offset 0x0A of the returned segment. The IVT
+        // entry for INT 67h points here. Bytes 0-1 are a short JMP straight to the
+        // real dispatch stub at 0xFF67 (which CPU.step()'s F000:FF00-FFFF check
+        // turns into delegate.interrupt()), so the CPU's IVT far-jump for INT 67h
+        // still ends up at the reflection dispatch instead of executing the
+        // header/name bytes as code.
+        final int emmHeaderOffset = 0xFEF0;
+        final int emmDispatchOffset = 0xFF67;
+        if (EMS.getInstance() != null) {
+            int emmHeaderLinear = 0xF0000 + emmHeaderOffset;
+            int jmpRel = (emmDispatchOffset - (emmHeaderOffset + 3)) & 0xFFFF;
+            cpu.getMemory().setLinearByte(emmHeaderLinear, (byte) 0xE9);
+            cpu.getMemory().setLinearByte(emmHeaderLinear + 1, (byte) (jmpRel & 0xFF));
+            cpu.getMemory().setLinearByte(emmHeaderLinear + 2, (byte) ((jmpRel >> 8) & 0xFF));
+            byte[] emmName = "EMMXXXX0".getBytes();
+            for (int i = 0; i < emmName.length; i++) {
+                cpu.getMemory().setLinearByte(emmHeaderLinear + 0x0A + i, emmName[i]);
+            }
+            cpu.getMemory().setWord(new SegOfs((short) 0, (short) (0x67 * 4)), (short) emmHeaderOffset);
+            cpu.getMemory().setWord(new SegOfs((short) 0, (short) (0x67 * 4 + 2)), (short) 0xF000);
+        }
+
         final EnvironmentVariables environment = new EnvironmentVariables(cpu.getMemory(), (short) 0x0050, (short) 0x0000);
         environment.writeVariable("PATH", "C:\\");
         for (String env : environmentVariables) {

@@ -10,19 +10,16 @@ import nz.co.electricbolt.xt.usermode.interrupts.annotations.Interrupt;
 
 public class EMSManagement {
 
-    private EMS ems;
-
     public EMSManagement() {
-        this.ems = null;
     }
 
-    public void setEMS(EMS ems) {
-        this.ems = ems;
+    private static EMS ems() {
+        return EMS.getInstance();
     }
 
     @Interrupt(interrupt = 0x67, function = 0x40, description = "EMS: Get status")
     public void emsGetStatus(CPU cpu) {
-        if (ems == null) {
+        if (ems() == null) {
             cpu.getReg().AH.setValue((byte) 0x80);
             return;
         }
@@ -31,6 +28,7 @@ public class EMSManagement {
 
     @Interrupt(interrupt = 0x67, function = 0x41, description = "EMS: Get page frame segment")
     public void emsGetPageFrame(CPU cpu) {
+        EMS ems = ems();
         if (ems == null) {
             cpu.getReg().AH.setValue((byte) 0x80);
             return;
@@ -41,6 +39,7 @@ public class EMSManagement {
 
     @Interrupt(interrupt = 0x67, function = 0x42, description = "EMS: Get unallocated page count")
     public void emsGetUnallocatedPages(CPU cpu) {
+        EMS ems = ems();
         if (ems == null) {
             cpu.getReg().AH.setValue((byte) 0x80);
             return;
@@ -52,6 +51,7 @@ public class EMSManagement {
 
     @Interrupt(interrupt = 0x67, function = 0x43, description = "EMS: Allocate pages")
     public void emsAllocatePages(CPU cpu, final @BX short pages) {
+        EMS ems = ems();
         if (ems == null) {
             cpu.getReg().AH.setValue((byte) 0x80);
             return;
@@ -69,6 +69,7 @@ public class EMSManagement {
     @Interrupt(interrupt = 0x67, function = 0x44, description = "EMS: Map/Unmap pages")
     public void emsMapPage(CPU cpu, final @AL byte subfunction, final @DX short physicalPageFrame,
                            final @BX short handle, final @DI short logicalPage) {
+        EMS ems = ems();
         if (ems == null) {
             cpu.getReg().AH.setValue((byte) 0x80);
             return;
@@ -87,6 +88,7 @@ public class EMSManagement {
 
     @Interrupt(interrupt = 0x67, function = 0x45, description = "EMS: Free pages")
     public void emsFreePages(CPU cpu, final @DX short handle) {
+        EMS ems = ems();
         if (ems == null) {
             cpu.getReg().AH.setValue((byte) 0x80);
             return;
@@ -97,6 +99,7 @@ public class EMSManagement {
 
     @Interrupt(interrupt = 0x67, function = 0x46, description = "EMS: Get version")
     public void emsGetVersion(CPU cpu) {
+        EMS ems = ems();
         if (ems == null) {
             cpu.getReg().AH.setValue((byte) 0x80);
             return;
@@ -108,6 +111,7 @@ public class EMSManagement {
 
     @Interrupt(interrupt = 0x67, function = 0x4B, description = "EMS: Get handle pages")
     public void emsGetHandlePages(CPU cpu, final @DX short handle) {
+        EMS ems = ems();
         if (ems == null) {
             cpu.getReg().AH.setValue((byte) 0x80);
             return;
