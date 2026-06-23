@@ -251,18 +251,12 @@ memory protection code in `ProgramLoader.java`.
 - INT 2F function 431C - XMS: Get UMB size
 - INT 2F function 431D - XMS: Allocate UMB
 - INT 2F function 431E - XMS: Free UMB
-- INT 67 function 00 - EMS: Installation check
-- INT 67 function 01 - EMS: Get EMS status
-- INT 67 function 02 - EMS: Get page frame segment
-- INT 67 function 03 - EMS: Get unallocated page count
-- INT 67 function 04 - EMS: Allocate pages
-- INT 67 function 05 - EMS: Map page
-- INT 67 function 06 - EMS: Free pages
-- INT 67 function 07 - EMS: Get version
-- INT 67 function 08 - EMS: Save page map
-- INT 67 function 09 - EMS: Restore page map
-- INT 67 function 0A - EMS: Get handle pages
-- INT 67 function 0B - EMS: Get handle count
-- INT 67 function 0C - EMS: Get handle pages (alternative)
-- INT 67 function 0D - EMS: Get handle count (alternative)
-- INT 67 function 0E - EMS: Get page frame address
+- INT 67 function 40 - EMS: Get status
+- INT 67 function 41 - EMS: Get page frame segment
+- INT 67 function 42 - EMS: Get unallocated page count
+- INT 67 function 43 - EMS: Allocate pages
+- INT 67 function 44 - EMS: Map/Unmap pages
+- INT 67 function 45 - EMS: Free pages
+- INT 67 function 46 - EMS: Get version
+- INT 67 function 4B - EMS: Get handle pages
+- EMS driver detection: INT 67 function 40, opening the `EMMXXXX0` device by name (INT 21 AH=3D), and INT 21 AH=35 (get vector for INT 67) followed by reading the device name field are all supported
