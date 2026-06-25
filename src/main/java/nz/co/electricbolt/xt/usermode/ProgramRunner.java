@@ -29,11 +29,13 @@ public class ProgramRunner implements CPUDelegate {
     private final Long maxInstructions;
     private final boolean traceMode;
     private final List<String> environmentVariables;
+    private final boolean noEMS;
 
     public ProgramRunner(final String programPath, final String commandLine, final String hostWorkingDirectory,
                          final boolean traceCPU, final boolean traceInterrupt, final String traceFile,
                          final List<Breakpoint> breakpoints, final List<Watchpoint> watchpoints, final Long maxInstructions,
-                         final boolean traceMode, List<DumpRegion> dumpRegions, List<String> environmentVariables) {
+                         final boolean traceMode, List<DumpRegion> dumpRegions, List<String> environmentVariables,
+                         final boolean noEMS) {
         directoryTranslation = new DirectoryTranslation(hostWorkingDirectory);
         this.programPath = directoryTranslation.emulatedPathToHostPath(programPath);
         this.commandLine = commandLine;
@@ -43,6 +45,7 @@ public class ProgramRunner implements CPUDelegate {
         this.maxInstructions = maxInstructions;
         this.traceMode = traceMode;
         this.environmentVariables = environmentVariables;
+        this.noEMS = noEMS;
 
         this.cpu = new CPU(this);
         this.interrupts = new Interrupts();
@@ -52,8 +55,10 @@ public class ProgramRunner implements CPUDelegate {
     }
 
     public void loadAndExecute() {
-        EMS.init(16 * 1024);
-        cpu.getMemory().setEMS(EMS.getInstance());
+        if (!noEMS) {
+            EMS.init(16 * 1024);
+            cpu.getMemory().setEMS(EMS.getInstance());
+        }
 
         for (int i = 0; i < 256; i++) {
             int linear = 0xF0000 + 0xFF00 + i;

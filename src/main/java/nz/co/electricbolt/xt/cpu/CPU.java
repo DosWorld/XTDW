@@ -128,8 +128,18 @@ public class CPU {
         short ip = reg.IP.getValue();
         SegOfs currentAddr = new SegOfs(cs, ip);
         StringBuilder bytes = new StringBuilder();
+        // CS:IP in these ranges is synthetic data xt writes outside the loaded program image (the
+        // IRET-stub region handled specially by step() below, and the fake EMM device-driver header
+        // at F000:0000 used for INT 67h detection - see ProgramRunner.loadAndExecute()). Neither has
+        // EXECUTE permission, so memory.fetchByte() would trigger invalidMemoryAccess() here even
+        // though the real fetch8()/fetch16() used by step() reads memory.buf[] directly and never
+        // checks permissions - so execution itself is unaffected, only this diagnostic dump would
+        // crash. Read the raw bytes directly instead of through the permission-checked fetch path.
+        boolean isStub = (cs & 0xFFFF) == 0xF000 && (ip & 0xFFFF) >= 0xFF00 && (ip & 0xFFFF) <= 0xFFFF;
+        boolean isEmmHeader = (cs & 0xFFFF) == 0xF000 && (ip & 0xFFFF) < 0x0012;
+        boolean isSynthetic = isStub || isEmmHeader;
         for (int i = 0; i < 6; i++) {
-            byte b = memory.fetchByte(currentAddr);
+            byte b = isSynthetic ? memory.getLinearByte(currentAddr.toLinearAddress()) : memory.fetchByte(currentAddr);
             bytes.append(String.format("%02X", b & 0xFF));
             currentAddr.increment();
         }
@@ -144,7 +154,8 @@ public class CPU {
             reg.flags.isDirectionDown() ? 'D' : '-',
             reg.flags.isOverflow() ? 'O' : '-'
         );
-        String disasm = disassembler.disassemble();
+        String disasm = isStub ? String.format("int 0x%02X (stub dispatch)", ip & 0xFF)
+            : isEmmHeader ? "emm header (synthetic)" : disassembler.disassemble();
         System.out.printf("%04X:%04X | %s | %-24s | AX=%04X,BX=%04X,CX=%04X,DX=%04X,SI=%04X,DI=%04X,BP=%04X,DS=%04X,ES=%04X | SS:SP=%04X:%04X | FLAGS=%s%n",
             cs & 0xFFFF,
             ip & 0xFFFF,

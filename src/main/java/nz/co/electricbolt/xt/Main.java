@@ -21,6 +21,7 @@ public class Main {
     private final List<Watchpoint> watchpoints = new ArrayList<>();
     private final List<DumpRegion> dumpRegions = new ArrayList<>();
     private final List<String> environmentVariables = new ArrayList<>();
+    private boolean noEMS = false;
 
     private Main(final CommandLineParser commandLine) {
         this.commandLine = commandLine;
@@ -51,6 +52,7 @@ public class Main {
         System.out.println("--max=N      = Maximum number of instructions to execute before stopping");
         System.out.println("-e KEY=VALUE = Set a DOS environment variable. Can be specified multiple times.");
         System.out.println("--env=KEY=VALUE = Set a DOS environment variable. Can be specified multiple times.");
+        System.out.println("--noems      = Disable EMS (expanded memory) emulation");
         System.out.println("-c dir       = The host directory that will be the root of the emulated C: drive");
         System.out.println("               If not specified then the current working directory will be used.");
         System.out.println("program      = The .EXE or .COM command line MS-DOS app you want to run. You can");
@@ -74,6 +76,7 @@ public class Main {
         System.out.println("--max=N      = Maximum number of instructions to trace before stopping");
         System.out.println("-e KEY=VALUE = Set a DOS environment variable. Can be specified multiple times.");
         System.out.println("--env=KEY=VALUE = Set a DOS environment variable. Can be specified multiple times.");
+        System.out.println("--noems      = Disable EMS (expanded memory) emulation");
         System.out.println("--bp=SEG:OFS = Set a breakpoint at the specified segment:offset (hex)");
         System.out.println("               Can be specified multiple times. Example: --bp=1000:2000");
         System.out.println("--bp=SEG:OFS:COND = Conditional breakpoint. Condition format: REG==VALUE");
@@ -116,7 +119,8 @@ public class Main {
             hostWorkingDir += File.separator;
         }
         final ProgramRunner runner = new ProgramRunner(emulatedProgramPath, emulatedProgramArgs, hostWorkingDir,
-                traceCPU, traceInterrupt, traceFile, breakpoints, watchpoints, maxInstructions, traceMode, dumpRegions, environmentVariables);
+                traceCPU, traceInterrupt, traceFile, breakpoints, watchpoints, maxInstructions, traceMode, dumpRegions, environmentVariables,
+                noEMS);
         printSettings();
         runner.loadAndExecute();
     }
@@ -230,6 +234,9 @@ public class Main {
                 parseMaxOption();
             } else if (argument.startsWith("--env=")) {
                 parseEnvOption();
+            } else if (argument.equals("--noems")) {
+                commandLine.next();
+                noEMS = true;
             } else {
                 haltSyntaxRun(argument + " option not recognized in run mode");
             }
@@ -533,6 +540,9 @@ public class Main {
                 parseWatchpointOption();
             } else if (argument.startsWith("--dump=")) {
                 parseDumpOption();
+            } else if (argument.equals("--noems")) {
+                commandLine.next();
+                noEMS = true;
             } else {
                 if (traceMode) {
                     haltSyntaxTrace(argument + " option not recognized");
