@@ -62,13 +62,17 @@ public class ProgramRunner implements CPUDelegate {
 
         // Fake EMS device driver header, read by programs that detect the EMM
         // driver via INT 21h AH=35h (get vector for INT 67h) followed by reading
-        // the 8-byte device name at offset 0x0A of the returned segment. The IVT
-        // entry for INT 67h points here. Bytes 0-1 are a short JMP straight to the
-        // real dispatch stub at 0xFF67 (which CPU.step()'s F000:FF00-FFFF check
-        // turns into delegate.interrupt()), so the CPU's IVT far-jump for INT 67h
-        // still ends up at the reflection dispatch instead of executing the
-        // header/name bytes as code.
-        final int emmHeaderOffset = 0xFEF0;
+        // the 8-byte device name at offset 0x0A of the *returned segment*. Real
+        // EMM drivers are loaded as device drivers whose header sits at seg:0000,
+        // so the canonical detector reads ES:000Ah (offset 0 + 0x0A). We therefore
+        // publish the INT 67h vector at offset 0 of segment 0xF000 and lay the
+        // header there: bytes 0-2 are a near JMP straight to the real dispatch stub
+        // at 0xFF67 (which CPU.step()'s F000:FF00-FFFF check turns into
+        // delegate.interrupt()), so the CPU's IVT far-jump for INT 67h still ends
+        // up at the reflection dispatch instead of executing the header/name bytes
+        // as code. The 8-byte name "EMMXXXX0" lands at offset 0x0A, matching the
+        // device-driver-header convention and making ES:000Ah the portable contract.
+        final int emmHeaderOffset = 0x0000;
         final int emmDispatchOffset = 0xFF67;
         if (EMS.getInstance() != null) {
             int emmHeaderLinear = 0xF0000 + emmHeaderOffset;

@@ -225,7 +225,7 @@ public class Memory {
 
     public void writeByte(final SegOfs segOfs, final byte value) {
         int address = segOfs.toLinearAddress();
-        if (emsEnabled && ems.isPageFrameSegment(segOfs.getSegment())) {
+        if (emsEnabled && ems.isPageFrameSegment(segOfs.getSegment()) && ems.isPageFrameMapped(segOfs.getSegment())) {
             ems.writeByte(address, value & 0xFF);
             return;
         }
@@ -310,7 +310,7 @@ public class Memory {
         int ofsHi = (ofsLo + 1) & 0xFFFF;
         int addrLo = (segBase + ofsLo) & 0xFFFFF;
         int addrHi = (segBase + ofsHi) & 0xFFFFF;
-        if (emsEnabled && ems.isPageFrameSegment(segOfs.getSegment())) {
+        if (emsEnabled && ems.isPageFrameSegment(segOfs.getSegment()) && ems.isPageFrameMapped(segOfs.getSegment())) {
             ems.writeByte(addrLo, (byte) value & 0xFF);
             ems.writeByte(addrHi, (byte) (value >> 8) & 0xFF);
             return;

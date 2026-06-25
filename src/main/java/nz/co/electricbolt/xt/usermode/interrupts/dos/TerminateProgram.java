@@ -66,7 +66,10 @@ public class TerminateProgram {
         return !contextStack.isEmpty();
     }
 
-    @Interrupt(interrupt = 0x20, function = 0x00, description = "Terminate program")
+    // INT 20h is a register-less "terminate program" call — real DOS ignores AH entirely. Register it as a
+    // wildcard (function=0xFF) so it terminates regardless of the AH value the program left in the register;
+    // matching only AH=00 would leave INT 20h with any other AH falling through to "Unhandled interrupt 20".
+    @Interrupt(interrupt = 0x20, function = 0xFF, description = "Terminate program")
     public void terminate1(final CPU cpu) {
         lastExitCode = 0;
         lastExitType = 0;

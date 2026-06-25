@@ -93,17 +93,23 @@ public class EMS {
     }
 
     public int mapPage(int handle, int logicalPage, int physicalPageFrame) {
-        if (physicalPageFrame < 0 || physicalPageFrame >= PAGE_FRAME_PAGES) return 0x8A;
+        // EMS error codes: 0x8B = invalid physical page, 0x8A = invalid logical page, 0x83 = invalid handle.
+        if (physicalPageFrame < 0 || physicalPageFrame >= PAGE_FRAME_PAGES) return 0x8B;
         HandleInfo info = handles.get(handle);
         if (info == null) return 0x83;
-        if (logicalPage < 0 || logicalPage >= info.pages) return 0x8B;
+        // Logical page 0xFFFF unmaps the physical page (LIM EMS convention).
+        if (logicalPage == 0xFFFF) {
+            pageFrameMappings[physicalPageFrame] = -1;
+            return 0;
+        }
+        if (logicalPage < 0 || logicalPage >= info.pages) return 0x8A;
         int physicalPage = info.physicalPages[logicalPage];
         pageFrameMappings[physicalPageFrame] = physicalPage;
         return 0;
     }
 
     public int unmapPage(int physicalPageFrame) {
-        if (physicalPageFrame < 0 || physicalPageFrame >= PAGE_FRAME_PAGES) return 0x8A;
+        if (physicalPageFrame < 0 || physicalPageFrame >= PAGE_FRAME_PAGES) return 0x8B;
         pageFrameMappings[physicalPageFrame] = -1;
         return 0;
     }
@@ -115,10 +121,21 @@ public class EMS {
         return (diff % PAGE_FRAME_SEGMENT_STEP) == 0;
     }
 
+    /**
+     * Returns true if the page-frame slot for the given segment currently has a handle page mapped.
+     * Memory.writeByte/writeWord must fall through to real RAM (not silently drop the write) when this
+     * is false, matching the read-side behaviour in EMS.readByte/Memory.readByte.
+     */
+    public boolean isPageFrameMapped(int segment) {
+        int diff = segment - PAGE_FRAME_SEGMENT;
+        if (diff < 0 || diff >= PAGE_FRAME_PAGES * PAGE_FRAME_SEGMENT_STEP) return false;
+        int slot = diff / PAGE_FRAME_SEGMENT_STEP;
+        return pageFrameMappings[slot] != -1;
+    }
+
     public int readByte(int linearAddress) {
-        int segment = (linearAddress >> 4) & 0xFFFF;
-        int offset = linearAddress & 0xFFFF;
-        int pageFrameIndex = (segment - PAGE_FRAME_SEGMENT) / PAGE_FRAME_SEGMENT_STEP;
+        int frameOffset = (linearAddress - (PAGE_FRAME_SEGMENT << 4)) & 0xFFFFF;
+        int pageFrameIndex = frameOffset / PAGE_SIZE;
         if (pageFrameIndex < 0 || pageFrameIndex >= PAGE_FRAME_PAGES) {
             return -1;
         }
@@ -126,18 +143,17 @@ public class EMS {
         if (physicalPage == -1) {
             return -1;
         }
-        int pageOffset = offset;
+        int pageOffset = frameOffset % PAGE_SIZE;
         int addr = physicalPage * PAGE_SIZE + pageOffset;
-        if (addr >= emsMemory.length) {
+        if (addr < 0 || addr >= emsMemory.length) {
             return -1;
         }
         return emsMemory[addr] & 0xFF;
     }
 
     public void writeByte(int linearAddress, int value) {
-        int segment = (linearAddress >> 4) & 0xFFFF;
-        int offset = linearAddress & 0xFFFF;
-        int pageFrameIndex = (segment - PAGE_FRAME_SEGMENT) / PAGE_FRAME_SEGMENT_STEP;
+        int frameOffset = (linearAddress - (PAGE_FRAME_SEGMENT << 4)) & 0xFFFFF;
+        int pageFrameIndex = frameOffset / PAGE_SIZE;
         if (pageFrameIndex < 0 || pageFrameIndex >= PAGE_FRAME_PAGES) {
             return;
         }
@@ -145,12 +161,57 @@ public class EMS {
         if (physicalPage == -1) {
             return;
         }
-        int pageOffset = offset;
+        int pageOffset = frameOffset % PAGE_SIZE;
         int addr = physicalPage * PAGE_SIZE + pageOffset;
-        if (addr >= emsMemory.length) {
+        if (addr < 0 || addr >= emsMemory.length) {
             return;
         }
         emsMemory[addr] = (byte) (value & 0xFF);
+    }
+
+    /**
+     * Reads a byte from the backing store of a handle's logical page (independent of the page-frame mapping).
+     * Used by the Move/Exchange Memory Region function (AH=57h). Returns -1 if handle/page/offset is invalid.
+     */
+    public int readLogical(int handle, int logicalPage, int offset) {
+        int addr = logicalAddress(handle, logicalPage, offset);
+        if (addr < 0) return -1;
+        return emsMemory[addr] & 0xFF;
+    }
+
+    /**
+     * Writes a byte to the backing store of a handle's logical page (independent of the page-frame mapping).
+     * Used by the Move/Exchange Memory Region function (AH=57h). Returns false if handle/page/offset is invalid.
+     */
+    public boolean writeLogical(int handle, int logicalPage, int offset, int value) {
+        int addr = logicalAddress(handle, logicalPage, offset);
+        if (addr < 0) return false;
+        emsMemory[addr] = (byte) (value & 0xFF);
+        return true;
+    }
+
+    /**
+     * Returns true if the given handle currently exists.
+     */
+    public boolean handleExists(int handle) {
+        return handles.containsKey(handle);
+    }
+
+    /**
+     * Resolves (handle, logicalPage, offset) to a flat index into {@code emsMemory}, or -1 if out of range.
+     * {@code offset} may span beyond a single 16 KB page; logical pages of a handle are treated as a
+     * contiguous run for the purposes of a Move/Exchange region, matching real EMM behaviour.
+     */
+    private int logicalAddress(int handle, int logicalPage, int offset) {
+        HandleInfo info = handles.get(handle);
+        if (info == null) return -1;
+        int flat = logicalPage * PAGE_SIZE + offset;
+        if (flat < 0) return -1;
+        int page = flat / PAGE_SIZE;
+        int pageOffset = flat % PAGE_SIZE;
+        if (page < 0 || page >= info.pages) return -1;
+        int physicalPage = info.physicalPages[page];
+        return physicalPage * PAGE_SIZE + pageOffset;
     }
 
     private static class HandleInfo {
