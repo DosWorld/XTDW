@@ -1085,6 +1085,10 @@ public class CPU {
         this.maxInstructions = max;
     }
 
+    public long getInstructionCount() {
+        return instructionCount;
+    }
+
     public void setBreakpoints(List<Breakpoint> breakpoints) {
         this.breakpoints = breakpoints;
         this.hasBreakpoints = !breakpoints.isEmpty();

@@ -55,6 +55,11 @@ public class BaseFile {
     public void write(byte[] buf) {
     }
 
+    // DOS INT 21h AH=40h with CX=0 truncates (or extends) the file to the current
+    // file position. The default (devices) is a no-op.
+    public void truncate() {
+    }
+
     public int size() {
         return 0;
     }

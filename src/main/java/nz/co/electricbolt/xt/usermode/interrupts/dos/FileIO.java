@@ -173,6 +173,16 @@ public class FileIO {
                           final @CX short numberOfBytesToWrite, final @DS @DX SegOfs address) {
         final BaseFile baseFile = getFileHandleOrSetErrorResult(cpu, trace, fileHandle);
         if (baseFile != null) {
+            final int count = numberOfBytesToWrite & 0xFFFF;
+            if (count == 0) {
+                // DOS convention: a write of zero bytes truncates (or extends) the
+                // file to the current file position. AX returns 0 bytes written.
+                trace.interrupt("Truncating file to current position");
+                baseFile.truncate();
+                cpu.getReg().flags.setCarry(false);
+                cpu.getReg().AX.setValue((short) 0);
+                return;
+            }
             final byte[] buf = MemoryUtil.readBuf(cpu.getMemory(), address, numberOfBytesToWrite);
             baseFile.write(buf);
             cpu.getReg().flags.setCarry(false);

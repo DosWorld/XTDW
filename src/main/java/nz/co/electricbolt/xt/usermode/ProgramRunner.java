@@ -52,6 +52,15 @@ public class ProgramRunner implements CPUDelegate {
         this.trace = new Trace(cpu, traceCPU, traceInterrupt, traceFile);
         this.cpu.fetchTracingEnabled = traceCPU || traceInterrupt;
         this.cpu.setTraceMode(traceMode);
+
+        // In trace mode, print the total number of executed instructions when the
+        // program ends. Termination happens through several System.exit() paths
+        // (normal DOS terminate, halt, invalid opcode/memory), so a shutdown hook
+        // is the one place that reliably fires for all of them.
+        if (traceMode) {
+            Runtime.getRuntime().addShutdownHook(new Thread(() ->
+                System.out.println("\nInstructions executed: " + cpu.getInstructionCount())));
+        }
     }
 
     public void loadAndExecute() {

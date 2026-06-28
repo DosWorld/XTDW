@@ -99,6 +99,22 @@ public class DiskFile extends BaseFile {
         }
     }
 
+    public void truncate() {
+        try {
+            final long pos = randomAccessFile.getFilePointer();
+            if (pos < randomAccessFile.length()) {
+                // Shrink to the current position.
+                randomAccessFile.getChannel().truncate(pos);
+            } else if (pos > randomAccessFile.length()) {
+                // Extend the file (with zero bytes) up to the current position.
+                randomAccessFile.setLength(pos);
+            }
+            randomAccessFile.seek(pos);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     public int size() {
         try {
             return (int) randomAccessFile.length();
