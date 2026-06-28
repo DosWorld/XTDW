@@ -204,7 +204,7 @@ public class EMSManagement {
         cpu.getReg().AL.setValue((byte) (version & 0xFF));
     }
 
-    @Interrupt(interrupt = 0x67, function = 0x4B, description = "EMS: Get handle pages")
+    @Interrupt(interrupt = 0x67, function = 0x4C, description = "EMS: Get handle pages")
     public void emsGetHandlePages(CPU cpu, final @DX short handle) {
         EMS ems = ems();
         if (ems == null) {
@@ -219,5 +219,18 @@ public class EMSManagement {
             cpu.getReg().AH.setValue((byte) 0x00);
             cpu.getReg().BX.setValue((short) pages[0]);
         }
+    }
+
+    @Interrupt(interrupt = 0x67, function = 0x51, description = "EMS: Reallocate pages")
+    public void emsReallocatePages(CPU cpu, final @BX short pages, final @DX short handle) {
+        EMS ems = ems();
+        if (ems == null) {
+            cpu.getReg().AH.setValue((byte) 0x80);
+            return;
+        }
+        int[] pagesOut = new int[1];
+        int err = ems.reallocatePages(handle & 0xFFFF, pages & 0xFFFF, pagesOut);
+        cpu.getReg().AH.setValue((byte) (err == 0 ? 0 : err));
+        cpu.getReg().BX.setValue((short) pagesOut[0]);
     }
 }

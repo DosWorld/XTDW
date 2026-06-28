@@ -92,6 +92,55 @@ public class EMS {
         return 0;
     }
 
+    /**
+     * LIM EMS 4.0 Function 18 (AH=51h) "Reallocate Pages": grows or shrinks a handle's page count, keeping
+     * the logical page sequence contiguous. On growth, new pages are appended; on shrink, pages are removed
+     * from the end. pagesOut is always set, even on error - to the handle's page count prior to (on failure)
+     * or after (on success) the request, matching the LIM spec's "verify expected results" contract.
+     */
+    public int reallocatePages(int handle, int newCount, int[] pagesOut) {
+        HandleInfo info = handles.get(handle);
+        if (info == null) {
+            pagesOut[0] = 0;
+            return 0x83;
+        }
+        pagesOut[0] = info.pages;
+        if (newCount == info.pages) return 0;
+        if (newCount > info.pages) {
+            int additional = newCount - info.pages;
+            if (freePhysicalPages.cardinality() < additional) return 0x87;
+            int[] newPhysicalPages = new int[newCount];
+            System.arraycopy(info.physicalPages, 0, newPhysicalPages, 0, info.pages);
+            int found = info.pages;
+            for (int i = 0; i < freePhysicalPages.size() && found < newCount; i++) {
+                if (freePhysicalPages.get(i)) {
+                    newPhysicalPages[found] = i;
+                    found++;
+                }
+            }
+            for (int i = info.pages; i < newCount; i++) {
+                freePhysicalPages.clear(newPhysicalPages[i]);
+            }
+            info.physicalPages = newPhysicalPages;
+            info.pages = newCount;
+        } else {
+            for (int i = newCount; i < info.pages; i++) {
+                freePhysicalPages.set(info.physicalPages[i]);
+                for (int slot = 0; slot < PAGE_FRAME_PAGES; slot++) {
+                    if (pageFrameMappings[slot] == info.physicalPages[i]) {
+                        pageFrameMappings[slot] = -1;
+                    }
+                }
+            }
+            int[] newPhysicalPages = new int[newCount];
+            System.arraycopy(info.physicalPages, 0, newPhysicalPages, 0, newCount);
+            info.physicalPages = newPhysicalPages;
+            info.pages = newCount;
+        }
+        pagesOut[0] = info.pages;
+        return 0;
+    }
+
     public int mapPage(int handle, int logicalPage, int physicalPageFrame) {
         // EMS error codes: 0x8B = invalid physical page, 0x8A = invalid logical page, 0x83 = invalid handle.
         if (physicalPageFrame < 0 || physicalPageFrame >= PAGE_FRAME_PAGES) return 0x8B;
