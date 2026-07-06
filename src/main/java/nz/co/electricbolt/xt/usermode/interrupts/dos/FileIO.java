@@ -544,6 +544,20 @@ public class FileIO {
         }
     }
 
+    @Interrupt(function = 0x57, subfunction = 0x01, description = "Set file's date and time")
+    public void setFileDateTime(final CPU cpu, final Trace trace, final @BX short fileHandle,
+                                final @CX short fileTime, final @DX short fileDate) {
+        final BaseFile baseFile = getFileHandleOrSetErrorResult(cpu, trace, fileHandle);
+        if (baseFile != null) {
+            final FileDateTime fileDateTime = FileDateTime.fromDOSTimeDate(fileTime, fileDate);
+            if (!baseFile.setDateTime(fileDateTime)) {
+                setErrorResult(cpu, trace, ErrorCode.InvalidHandle);
+                return;
+            }
+            cpu.getReg().flags.setCarry(false);
+        }
+    }
+
     @Interrupt(function = 0x39, description = "Create directory")
     public void createDirectory(final CPU cpu, final Trace trace, final DirectoryTranslation directoryTranslation,
                                 @ASCIZ @DS @DX String path) {

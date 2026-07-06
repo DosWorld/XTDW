@@ -75,5 +75,9 @@ public class BaseFile {
         return null;
     }
 
+    public boolean setDateTime(final FileDateTime dateTime) {
+        return false;
+    }
+
     public boolean delete() { return false; }
 }

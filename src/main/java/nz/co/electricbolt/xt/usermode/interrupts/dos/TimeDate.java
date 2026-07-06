@@ -11,7 +11,7 @@ public class TimeDate {
     public void getSystemDate(final CPU cpu) {
         final Calendar calendar = Calendar.getInstance();
         cpu.getReg().CX.setValue((short) calendar.get(Calendar.YEAR)); // 1980-2099.
-        cpu.getReg().DH.setValue((byte) calendar.get(Calendar.MONTH));
+        cpu.getReg().DH.setValue((byte) (calendar.get(Calendar.MONTH) + 1)); // 1-12.
         cpu.getReg().DL.setValue((byte) calendar.get(Calendar.DAY_OF_MONTH));
         cpu.getReg().AL.setValue((byte) (calendar.get(Calendar.DAY_OF_WEEK) - 1)); // 00h=Sunday.
     }
@@ -22,6 +22,6 @@ public class TimeDate {
         cpu.getReg().CH.setValue((byte) calendar.get(Calendar.HOUR_OF_DAY));
         cpu.getReg().CL.setValue((byte) calendar.get(Calendar.MINUTE));
         cpu.getReg().DH.setValue((byte) calendar.get(Calendar.SECOND));
-        cpu.getReg().DL.setValue((byte) (calendar.get(Calendar.MILLISECOND) * 10));
+        cpu.getReg().DL.setValue((byte) (calendar.get(Calendar.MILLISECOND) / 10)); // hundredths of a second.
     }
 }

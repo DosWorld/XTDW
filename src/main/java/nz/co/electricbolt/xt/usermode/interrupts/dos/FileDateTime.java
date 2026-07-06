@@ -35,7 +35,7 @@ public class FileDateTime {
         this.minutes = (byte) calendar.get(Calendar.MINUTE);
         this.seconds = (byte) (calendar.get(Calendar.SECOND) / 2);
         this.year = (byte) (calendar.get(Calendar.YEAR) - 1980);
-        this.month = (byte) calendar.get(Calendar.MONTH);
+        this.month = (byte) (calendar.get(Calendar.MONTH) + 1); // Calendar.MONTH is 0-based; DOS month is 1-12.
         this.day = (byte) calendar.get(Calendar.DAY_OF_MONTH);
     }
 
@@ -57,5 +57,22 @@ public class FileDateTime {
         return (short) (((year << 9) & 0b1111_1110_0000_0000) |
                 ((month << 5) & 0b0000_0001_1110_0000) |
                 (day & 0b0000_0000_0001_1111));
+    }
+
+    public static FileDateTime fromDOSTimeDate(final short dosTime, final short dosDate) {
+        final byte hours = (byte) ((dosTime >> 11) & 0x1F);
+        final byte minutes = (byte) ((dosTime >> 5) & 0x3F);
+        final byte seconds = (byte) (dosTime & 0x1F);
+        final byte year = (byte) ((dosDate >> 9) & 0x7F);
+        final byte month = (byte) ((dosDate >> 5) & 0x0F);
+        final byte day = (byte) (dosDate & 0x1F);
+        return new FileDateTime(hours, minutes, seconds, year, month, day);
+    }
+
+    public long toMillis() {
+        final Calendar calendar = Calendar.getInstance();
+        calendar.set(1980 + year, month - 1, day, hours, minutes, seconds * 2);
+        calendar.set(Calendar.MILLISECOND, 0);
+        return calendar.getTimeInMillis();
     }
 }

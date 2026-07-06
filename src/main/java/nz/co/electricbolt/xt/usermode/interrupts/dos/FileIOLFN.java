@@ -10,6 +10,7 @@ import nz.co.electricbolt.xt.usermode.interrupts.annotations.*;
 import nz.co.electricbolt.xt.usermode.util.DirectoryTranslation;
 import nz.co.electricbolt.xt.usermode.util.MemoryUtil;
 import nz.co.electricbolt.xt.usermode.util.Trace;
+import nz.co.electricbolt.xt.usermode.util.WildcardFileMatcher;
 
 import java.io.File;
 
@@ -98,6 +99,32 @@ public class FileIOLFN {
     public void findFirstLFN(CPU cpu, Trace trace, DirectoryTranslation dirTrans,
                               final @AL byte appendFlag, final @ASCIZ @DS @DX String path,
                               final @CX short attributeMask) {
+        final String upperPath = path.toUpperCase();
+        final int sepIndex = upperPath.lastIndexOf('\\');
+        final String emulatedDirectory = sepIndex != -1 ? upperPath.substring(0, sepIndex) : "";
+        final String filenamePattern = sepIndex != -1 ? upperPath.substring(sepIndex + 1) : upperPath;
+        final String hostDirectory = dirTrans.emulatedLfnPathToHostPath(
+                emulatedDirectory.isEmpty() ? dirTrans.getCurrentEmulatedDirectory() : emulatedDirectory);
+
+        final File hostDir = new File(hostDirectory);
+        final File[] candidates = hostDir.listFiles();
+        if (candidates == null) {
+            setErrorResult(cpu, trace, ErrorCode.PathNotFound);
+            return;
+        }
+
+        final WildcardFileMatcher matcher = new WildcardFileMatcher(filenamePattern);
+        boolean found = false;
+        for (final File f : candidates) {
+            if (matcher.matches(f.getName().toUpperCase())) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            setErrorResult(cpu, trace, ErrorCode.FileNotFound);
+            return;
+        }
         cpu.getReg().flags.setCarry(false);
     }
 

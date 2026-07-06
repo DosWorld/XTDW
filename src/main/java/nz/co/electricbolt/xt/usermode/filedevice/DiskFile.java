@@ -140,6 +140,10 @@ public class DiskFile extends BaseFile {
         }
     }
 
+    public boolean setDateTime(final FileDateTime dateTime) {
+        return file.setLastModified(dateTime.toMillis());
+    }
+
     public boolean delete() {
         return file.delete();
     }
