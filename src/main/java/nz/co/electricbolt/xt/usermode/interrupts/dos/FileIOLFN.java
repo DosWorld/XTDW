@@ -159,26 +159,6 @@ public class FileIOLFN {
     public void openFileLFN(CPU cpu, Trace trace, DirectoryTranslation dirTrans,
                              @ASCIZ @DS @SI String filename, final @BX short accessSharingMode,
                              final @CX short attributes, final @DX short action, final @AL byte fileHandleReturn) {
-        filename = dirTrans.emulatedLfnPathToHostPath(filename);
-        AccessMode accessMode = AccessMode.readWrite;
-        SharingMode sharingMode = SharingMode.compatibilityMode;
-        DiskFile file = new DiskFile(filename, accessMode, sharingMode, false);
-        if ((action & 0x01) != 0) {
-            if (!file.create()) {
-                setErrorResult(cpu, trace, ErrorCode.AccessDenied);
-                return;
-            }
-        } else if ((action & 0x02) != 0) {
-            if (!file.open()) {
-                setErrorResult(cpu, trace, ErrorCode.FileNotFound);
-                return;
-            }
-        } else {
-            setErrorResult(cpu, trace, ErrorCode.FunctionNumberInvalid);
-            return;
-        }
-        short handle = (short) (System.currentTimeMillis() % 0xFFFF);
-        cpu.getReg().flags.setCarry(false);
-        cpu.getReg().AX.setValue(handle);
+        setErrorResult(cpu, trace, ErrorCode.FunctionNumberInvalid);
     }
 }
