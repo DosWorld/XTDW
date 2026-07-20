@@ -63,7 +63,13 @@ public class DOSMemoryManager {
         firstMCBSegment = (short) (pspSeg - 1);
 
         // Paragraphs from PSP to top of 640 KB conventional memory (0xA000)
-        int topParagraph = 0xA000;
+        //int topParagraph = 0xA000;
+        // Paragraphs from PSP to top of 576 KB conventional memory (0xA000)
+        //int topParagraph = 0x9000;
+        // Paragraphs from PSP to top of 544 KB conventional memory (0xA000)
+        int topParagraph = 0x8800;
+        // Paragraphs from PSP to top of 512 KB conventional memory (0xA000)
+        //int topParagraph = 0x8000;
         int programParagraphs = topParagraph - pspSeg;
 
         writeMCB(firstMCBSegment, MCB_LAST, pspSegment, (short) programParagraphs);
