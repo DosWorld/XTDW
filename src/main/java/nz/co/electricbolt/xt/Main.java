@@ -28,7 +28,7 @@ public class Main {
     }
 
     private void printAppVersion() {
-        System.out.println("XT/DW version 1.0.6; Copyright (c) 2026; DosWorld.");
+        System.out.println("XT/DW version 1.0.7; Copyright (c) 2026; DosWorld.");
         System.out.println("Copyright (c) 2025; Electric Bolt Limited.");
     }
 
