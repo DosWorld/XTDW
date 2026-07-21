@@ -48,28 +48,50 @@ public class DOSMemoryManager {
         this.cpu = cpu;
     }
     
+    // Default top-of-conventional-memory paragraph when no --memkb override is given
+    // (544 KB — matches the emulator's historical default).
+    public static final int DEFAULT_TOP_PARAGRAPH = 0x8800;
+
+    // Real DOS conventional memory ceiling: segment 0xA000 (640 KB).
+    private static final int MAX_TOP_PARAGRAPH = 0xA000;
+
     /**
-     * Initialize the DOS memory chain. Places one MCB at pspSegment-1 that owns the entire
-     * remaining memory (PSP through top of conventional RAM), assigned to the program at
-     * pspSegment. Programs must call INT 21h/4Ah (resize) to release unused memory to the
-     * free pool, exactly as real DOS requires.
+     * Converts a conventional-memory size in KB to a top-of-memory paragraph value
+     * suitable for {@link #initialize(short, int)}. Clamped to real DOS's 640 KB ceiling.
+     *
+     * @param kb Requested conventional memory size in KB (e.g. 640 for the real-DOS max)
+     * @return topParagraph — the paragraph (segment) marking the top of conventional RAM
+     */
+    public static int topParagraphFromKB(int kb) {
+        int topParagraph = (kb * 1024) / 16;
+        if (topParagraph > MAX_TOP_PARAGRAPH) topParagraph = MAX_TOP_PARAGRAPH;
+        return topParagraph;
+    }
+
+    /**
+     * Initialize the DOS memory chain using the default top-of-memory paragraph.
      *
      * @param pspSegment The segment of the Program Segment Prefix (e.g. 0x0090)
      */
     public void initialize(short pspSegment) {
+        initialize(pspSegment, DEFAULT_TOP_PARAGRAPH);
+    }
+
+    /**
+     * Initialize the DOS memory chain. Places one MCB at pspSegment-1 that owns the entire
+     * remaining memory (PSP through topParagraph), assigned to the program at
+     * pspSegment. Programs must call INT 21h/4Ah (resize) to release unused memory to the
+     * free pool, exactly as real DOS requires.
+     *
+     * @param pspSegment The segment of the Program Segment Prefix (e.g. 0x0090)
+     * @param topParagraph Paragraph marking the top of conventional RAM (e.g. 0x8800 for 544 KB)
+     */
+    public void initialize(short pspSegment, int topParagraph) {
         int pspSeg = pspSegment & 0xFFFF;
 
         // MCB sits one paragraph before the PSP
         firstMCBSegment = (short) (pspSeg - 1);
 
-        // Paragraphs from PSP to top of 640 KB conventional memory (0xA000)
-        //int topParagraph = 0xA000;
-        // Paragraphs from PSP to top of 576 KB conventional memory (0xA000)
-        //int topParagraph = 0x9000;
-        // Paragraphs from PSP to top of 544 KB conventional memory (0xA000)
-        int topParagraph = 0x8800;
-        // Paragraphs from PSP to top of 512 KB conventional memory (0xA000)
-        //int topParagraph = 0x8000;
         int programParagraphs = topParagraph - pspSeg;
 
         writeMCB(firstMCBSegment, MCB_LAST, pspSegment, (short) programParagraphs);

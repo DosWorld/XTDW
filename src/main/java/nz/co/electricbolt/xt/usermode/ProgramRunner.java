@@ -30,12 +30,22 @@ public class ProgramRunner implements CPUDelegate {
     private final boolean traceMode;
     private final List<String> environmentVariables;
     private final boolean noEMS;
+    private final Integer conventionalMemoryKB;
 
     public ProgramRunner(final String programPath, final String commandLine, final String hostWorkingDirectory,
                          final boolean traceCPU, final boolean traceInterrupt, final String traceFile,
                          final List<Breakpoint> breakpoints, final List<Watchpoint> watchpoints, final Long maxInstructions,
                          final boolean traceMode, List<DumpRegion> dumpRegions, List<String> environmentVariables,
                          final boolean noEMS) {
+        this(programPath, commandLine, hostWorkingDirectory, traceCPU, traceInterrupt, traceFile, breakpoints,
+                watchpoints, maxInstructions, traceMode, dumpRegions, environmentVariables, noEMS, null);
+    }
+
+    public ProgramRunner(final String programPath, final String commandLine, final String hostWorkingDirectory,
+                         final boolean traceCPU, final boolean traceInterrupt, final String traceFile,
+                         final List<Breakpoint> breakpoints, final List<Watchpoint> watchpoints, final Long maxInstructions,
+                         final boolean traceMode, List<DumpRegion> dumpRegions, List<String> environmentVariables,
+                         final boolean noEMS, final Integer conventionalMemoryKB) {
         directoryTranslation = new DirectoryTranslation(hostWorkingDirectory);
         this.programPath = directoryTranslation.emulatedPathToHostPath(programPath);
         this.commandLine = commandLine;
@@ -46,6 +56,7 @@ public class ProgramRunner implements CPUDelegate {
         this.traceMode = traceMode;
         this.environmentVariables = environmentVariables;
         this.noEMS = noEMS;
+        this.conventionalMemoryKB = conventionalMemoryKB;
 
         this.cpu = new CPU(this);
         this.interrupts = new Interrupts();
@@ -86,6 +97,16 @@ public class ProgramRunner implements CPUDelegate {
         // up at the reflection dispatch instead of executing the header/name bytes
         // as code. The 8-byte name "EMMXXXX0" lands at offset 0x0A, matching the
         // device-driver-header convention and making ES:000Ah the portable contract.
+        //
+        // Some callers instead follow the device-driver dispatch convention
+        // literally: fetch the vector via AH=35h, then `call far` it directly
+        // rather than executing `int 67h` themselves - both paths land on this
+        // same header. A direct far call only pushes a 2-word CS:IP frame, while
+        // a real `int 67h` pushes a 3-word flags+CS:IP frame; step()'s
+        // F000:FF00-FFFF interception must therefore behave differently
+        // depending on which brought it here (real iret() consumes 3 words, a
+        // matching return for a bare far call must consume only 2) - see
+        // CPU.lastEntryWasInt for how that's distinguished.
         final int emmHeaderOffset = 0x0000;
         final int emmDispatchOffset = 0xFF67;
         if (EMS.getInstance() != null) {
@@ -117,7 +138,12 @@ public class ProgramRunner implements CPUDelegate {
         psp.writeProgramEnd((short) 0xF000);
         psp.writeEnvironment((short) 0x0050);
         psp.writeCommandLine(commandLine);
-        nz.co.electricbolt.xt.usermode.interrupts.dos.Memory.initializeMemoryManager(cpu, (short) 0x0090);
+        if (conventionalMemoryKB != null) {
+            int topParagraph = nz.co.electricbolt.xt.usermode.interrupts.dos.DOSMemoryManager.topParagraphFromKB(conventionalMemoryKB);
+            nz.co.electricbolt.xt.usermode.interrupts.dos.Memory.initializeMemoryManager(cpu, (short) 0x0090, topParagraph);
+        } else {
+            nz.co.electricbolt.xt.usermode.interrupts.dos.Memory.initializeMemoryManager(cpu, (short) 0x0090);
+        }
 
         String filename1 = "";
         String filename2 = "";

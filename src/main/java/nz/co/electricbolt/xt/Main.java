@@ -22,13 +22,15 @@ public class Main {
     private final List<DumpRegion> dumpRegions = new ArrayList<>();
     private final List<String> environmentVariables = new ArrayList<>();
     private boolean noEMS = false;
+    private static final int MEMKB_DEFAULT = 544;
+    private Integer conventionalMemoryKB = MEMKB_DEFAULT;
 
     private Main(final CommandLineParser commandLine) {
         this.commandLine = commandLine;
     }
 
     private void printAppVersion() {
-        System.out.println("XT/DW version 1.0.6; Copyright (c) 2026; DosWorld.");
+        System.out.println("XT/DW version 1.0.7; Copyright (c) 2026; DosWorld.");
         System.out.println("Copyright (c) 2025; Electric Bolt Limited.");
     }
 
@@ -53,6 +55,8 @@ public class Main {
         System.out.println("-e KEY=VALUE = Set a DOS environment variable. Can be specified multiple times.");
         System.out.println("--env=KEY=VALUE = Set a DOS environment variable. Can be specified multiple times.");
         System.out.println("--noems      = Disable EMS (expanded memory) emulation");
+        System.out.println("--memkb=N    = DOS conventional memory size in KB available to the program");
+        System.out.println("               Valid values: " + MEMKB_MIN + ".." + MEMKB_MAX + ", default " + MEMKB_DEFAULT);
         System.out.println("-c dir       = The host directory that will be the root of the emulated C: drive");
         System.out.println("               If not specified then the current working directory will be used.");
         System.out.println("program      = The .EXE or .COM command line MS-DOS app you want to run. You can");
@@ -70,13 +74,17 @@ public class Main {
 
     private void haltSyntaxTrace(final String message) {
         printAppVersion();
-        System.out.println("Syntax:        xt trace [--max=N] [-e KEY=VALUE]... [--bp=SEG:OFS[:COND]]... [--wp=SEG:OFS:type]... [--dump=SEG:OFS:LEN]... program [program-args]");
+        System.out.println("Syntax:        xt trace [--max=N] [-e KEY=VALUE]... [-c dir] [--bp=SEG:OFS[:COND]]... [--wp=SEG:OFS:type]... [--dump=SEG:OFS:LEN]... program [program-args]");
         System.out.println("               Trace execution of a .EXE or .COM command line MS-DOS app.");
         System.out.println("               For each instruction, displays CS:IP, disassembly, and all register values.");
         System.out.println("--max=N      = Maximum number of instructions to trace before stopping");
         System.out.println("-e KEY=VALUE = Set a DOS environment variable. Can be specified multiple times.");
         System.out.println("--env=KEY=VALUE = Set a DOS environment variable. Can be specified multiple times.");
         System.out.println("--noems      = Disable EMS (expanded memory) emulation");
+        System.out.println("-c dir       = The host directory that will be the root of the emulated C: drive");
+        System.out.println("               If not specified then the current working directory will be used.");
+        System.out.println("--memkb=N    = DOS conventional memory size in KB available to the program");
+        System.out.println("               Valid values: " + MEMKB_MIN + ".." + MEMKB_MAX + ", default " + MEMKB_DEFAULT);
         System.out.println("--bp=SEG:OFS = Set a breakpoint at the specified segment:offset (hex)");
         System.out.println("               Can be specified multiple times. Example: --bp=1000:2000");
         System.out.println("--bp=SEG:OFS:COND = Conditional breakpoint. Condition format: REG==VALUE");
@@ -120,7 +128,7 @@ public class Main {
         }
         final ProgramRunner runner = new ProgramRunner(emulatedProgramPath, emulatedProgramArgs, hostWorkingDir,
                 traceCPU, traceInterrupt, traceFile, breakpoints, watchpoints, maxInstructions, traceMode, dumpRegions, environmentVariables,
-                noEMS);
+                noEMS, conventionalMemoryKB);
         printSettings();
         runner.loadAndExecute();
     }
@@ -146,6 +154,9 @@ public class Main {
         }
         if (maxInstructions != null) {
             System.out.println("Maximum instructions limit: " + maxInstructions);
+        }
+        if (conventionalMemoryKB != null) {
+            System.out.println("DOS conventional memory: " + conventionalMemoryKB + " KB");
         }
     }
 
@@ -195,10 +206,12 @@ public class Main {
     private void parseRootDirectory() {
         commandLine.next();
         String argument = commandLine.next();
-        if (argument == null) {
-            haltSyntaxRun("expecting host root directory argument");
-        } else if (argument.startsWith("-")) {
-            haltSyntaxRun("expecting host root directory argument");
+        if (argument == null || argument.startsWith("-")) {
+            if (traceMode) {
+                haltSyntaxTrace("expecting host root directory argument");
+            } else {
+                haltSyntaxRun("expecting host root directory argument");
+            }
         } else {
             hostWorkingDir = argument;
         }
@@ -237,6 +250,8 @@ public class Main {
             } else if (argument.equals("--noems")) {
                 commandLine.next();
                 noEMS = true;
+            } else if (argument.startsWith("--memkb=")) {
+                parseMemKBOption();
             } else {
                 haltSyntaxRun(argument + " option not recognized in run mode");
             }
@@ -354,6 +369,8 @@ public class Main {
                 parseDoubleDashOptions();
             } else if (argument.equals("-e")) {
                 parseEnvOption();
+            } else if (argument.equals("-c")) {
+                parseRootDirectory();
             } else if (argument.startsWith("-t")) {
                 parseTraceOptions();
             } else {
@@ -415,6 +432,32 @@ public class Main {
                 } else {
                     haltSyntaxRun("Invalid --max value: " + argument.substring(6));
                 }
+            }
+        }
+        return false;
+    }
+
+    private static final int MEMKB_MIN = 4;
+    private static final int MEMKB_MAX = 640;
+
+    private boolean parseMemKBOption() {
+        String argument = commandLine.peek();
+        if (argument != null && argument.startsWith("--memkb=")) {
+            commandLine.next();
+            String value = argument.substring(8);
+            try {
+                int kb = Integer.parseInt(value);
+                if (kb < MEMKB_MIN || kb > MEMKB_MAX) {
+                    String message = "--memkb value must be between " + MEMKB_MIN + " and " + MEMKB_MAX;
+                    if (traceMode) haltSyntaxTrace(message);
+                    else haltSyntaxRun(message);
+                }
+                conventionalMemoryKB = kb;
+                return true;
+            } catch (NumberFormatException e) {
+                String message = "Invalid --memkb value: " + value;
+                if (traceMode) haltSyntaxTrace(message);
+                else haltSyntaxRun(message);
             }
         }
         return false;
@@ -543,6 +586,8 @@ public class Main {
             } else if (argument.equals("--noems")) {
                 commandLine.next();
                 noEMS = true;
+            } else if (argument.startsWith("--memkb=")) {
+                parseMemKBOption();
             } else {
                 if (traceMode) {
                     haltSyntaxTrace(argument + " option not recognized");

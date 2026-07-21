@@ -28,6 +28,13 @@ public class CPU {
     int csBase;  // (CS & 0xFFFF) << 4, kept in sync with reg.CS
     int ssBase;  // (SS & 0xFFFF) << 4, kept in sync with reg.SS
 
+    // Set by interrupt(byte) immediately before it redirects CS:IP via the IVT; consumed (and cleared) by
+    // step()'s F000:FF00-FFFF stub-region special case to decide whether the frame on the stack is a real
+    // 3-word int-pushed frame (flags+CS:IP, needs a genuine iret()) or a bare 2-word far-call frame (CS:IP
+    // only, needs a plain 2-word return) - see ProgramRunner.loadAndExecute()'s EMM header comment for why
+    // both control-flow shapes can land on the same synthetic address.
+    private boolean lastEntryWasInt = false;
+
     private long maxInstructions = -1;
     private List<Breakpoint> breakpoints = new ArrayList<>();
     private boolean hasBreakpoints = false;
@@ -179,10 +186,24 @@ public class CPU {
     private void step() {
         if ((reg.CS.getValue() & 0xFFFF) == 0xF000 && (reg.IP.getValue() & 0xFFFF) >= 0xFF00 && (reg.IP.getValue() & 0xFFFF) <= 0xFFFF) {
             int interrupt = reg.IP.getValue() & 0xFF;
+            boolean viaInt = lastEntryWasInt;
+            lastEntryWasInt = false;
             delegate.interrupt((byte) interrupt);
-            short handlerFlags = reg.flags.getValue16();
-            iret();
-            reg.flags.setValue16(handlerFlags);
+            if (viaInt) {
+                // Real `int nn` pushed a 3-word flags+CS:IP frame - consume it with a genuine iret(),
+                // restoring the handler's flags afterward (matching real hardware: IRET pops flags too,
+                // but DOS interrupt handlers are expected to return the flags they were entered with
+                // except as modified by the handler itself, e.g. CF for error signalling).
+                short handlerFlags = reg.flags.getValue16();
+                iret();
+                reg.flags.setValue16(handlerFlags);
+            } else {
+                // Reached via a direct far call/jmp to this synthetic address (e.g. an EMM driver
+                // vector fetched via INT 21h AH=35h and called directly) - only a 2-word CS:IP frame
+                // is on the stack, so unwind with a plain far return instead of a 3-word iret().
+                reg.IP.setValue(pop16());
+                setCS(pop16());
+            }
             return;
         }
 
@@ -1025,6 +1046,7 @@ public class CPU {
         int ivtBase = 4 * (interrupt & 0xFF);
         setCS(memory.getWordAtLinear(ivtBase + 2));
         reg.IP.setValue(memory.getWordAtLinear(ivtBase));
+        lastEntryWasInt = true;
     }
 
     void loadSeg(Reg16 segReg) {

@@ -13,6 +13,11 @@ public class Memory {
         memoryManager = new DOSMemoryManager(cpu);
         memoryManager.initialize(pspSegment);
     }
+
+    public static void initializeMemoryManager(CPU cpu, short pspSegment, int topParagraph) {
+        memoryManager = new DOSMemoryManager(cpu);
+        memoryManager.initialize(pspSegment, topParagraph);
+    }
     
     @Interrupt(function = 0x48, description = "Allocate memory block")
     public void allocateMemoryBlock(CPU cpu, @BX short paragraphs) {
